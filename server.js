@@ -1,45 +1,54 @@
+require('dotenv').config();
 const express = require('express');
 const multer = require('multer');
 const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
-require('dotenv').config();
 
 const app = express();
 app.use(cors());
-app.use(express.json());
 
-const upload = multer({ dest: 'uploads/' });
+const uploadDir = process.env.UPLOAD_DIR || 'uploads';
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir);
+}
 
-app.post('/submit', upload.fields([
-  { name: 'formData', maxCount: 1 },
-  { name: 'audio', maxCount: 1 }
-]), (req, res) => {
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, uploadDir),
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    cb(null, 'audio-' + uniqueSuffix + '.webm');
+  }
+});
+
+const upload = multer({ storage });
+
+// 🔧 Вот тут обрабатываем обычное поле formData и файл audio
+app.post('/submit', upload.single('audio'), (req, res) => {
   try {
-    const formFile = req.files['formData']?.[0];
-    const audioFile = req.files['audio']?.[0];
+    console.log('req.body:', req.body);
 
-    if (!formFile || !audioFile) {
-      return res.status(400).json({ error: 'Missing formData or audio' });
+    const formDataRaw = req.body.formData;
+    if (!formDataRaw) {
+      return res.status(400).json({ error: 'Missing formData' });
     }
 
-    // Читаем JSON из файла
-    const formDataRaw = fs.readFileSync(formFile.path, 'utf8');
-    let formData;
-    try {
-      formData = JSON.parse(formDataRaw);
-    } catch (err) {
-      return res.status(400).json({ error: 'Invalid JSON in formData' });
+    const formData = JSON.parse(formDataRaw);
+    const audioFile = req.file;
+
+    if (!audioFile) {
+      return res.status(400).json({ error: 'Missing audio file' });
     }
 
-    // Путь к аудио
-    const audioPath = path.resolve(audioFile.path);
+    const application = {
+      ...formData,
+      audioFile: audioFile.filename,
+      submittedAt: new Date().toISOString()
+    };
 
-    // Логируем для проверки
-    console.log('Received formData:', formData);
-    console.log('Received audio file:', audioPath);
+    console.log('Received application:', application);
 
-    res.json({ message: 'Data received successfully' });
+    res.json({ message: 'Data received successfully', data: application });
   } catch (err) {
     console.error('Error in /submit:', err);
     res.status(500).json({ error: 'Server error' });
