@@ -21,26 +21,28 @@ const transporter = nodemailer.createTransport({
   }
 });
 
-app.post('/submit', upload.single('audio'), async (req, res) => {
+app.post('/submit', upload.fields([
+  { name: 'audio', maxCount: 1 },
+  { name: 'formData', maxCount: 1 }
+]), async (req, res) => {
   try {
-    const formDataRaw = req.body.formData;
+    const formDataFile = req.files?.formData?.[0];
+    const audioFile = req.files?.audio?.[0];
 
-    if (!formDataRaw || !req.file) {
+    if (!formDataFile || !audioFile) {
       return res.status(400).json({ success: false, message: 'Missing formData or audio file' });
     }
 
+    const formDataRaw = fs.readFileSync(formDataFile.path, 'utf8');
     const formData = JSON.parse(formDataRaw);
 
     const application = {
       ...formData,
-      audioFile: req.file.filename,
+      audioFile: audioFile.filename,
       submittedAt: new Date().toISOString()
     };
 
-    // Логируем
-    console.log('Received application:', application);
-
-    // Формируем письмо
+    // Email и логика та же
     const { email, fullname, age, country, languages, timezone, experience } = application.basicInfo;
     const score = application.quizScore;
     const percentage = application.quizPercentage;
@@ -59,11 +61,10 @@ app.post('/submit', upload.single('audio'), async (req, res) => {
         <p><strong>Языки:</strong> ${languages?.join(', ') || '—'}</p>
         <p><strong>Опыт:</strong> ${experience || '—'}</p>
         <p><strong>Тест:</strong> ${score}/20 (${percentage}%)</p>
-        <p><strong>Файл:</strong> ${req.file.filename}</p>
+        <p><strong>Файл:</strong> ${audioFile.filename}</p>
       `
     };
 
-    // Отправляем письмо
     await transporter.sendMail(mailOptions);
 
     res.status(201).json({ success: true, message: 'Application submitted and email sent' });
@@ -71,9 +72,4 @@ app.post('/submit', upload.single('audio'), async (req, res) => {
     console.error('Error submitting application:', err);
     res.status(500).json({ success: false, message: 'Internal server error', error: err.message });
   }
-});
-
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
 });
