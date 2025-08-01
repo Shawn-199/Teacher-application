@@ -42,7 +42,7 @@ app.post('/submit', upload.fields([
       submittedAt: new Date().toISOString()
     };
 
-    // Email и логика та же
+    // Email details
     const { email, fullname, age, country, languages, timezone, experience } = application.basicInfo;
     const score = application.quizScore;
     const percentage = application.quizPercentage;
@@ -72,4 +72,9 @@ app.post('/submit', upload.fields([
     console.error('Error submitting application:', err);
     res.status(500).json({ success: false, message: 'Internal server error', error: err.message });
   }
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
 });
