@@ -2,16 +2,17 @@ const express = require('express');
 const multer = require('multer');
 const cors = require('cors');
 const nodemailer = require('nodemailer');
+const path = require('path');
 require('dotenv').config();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Настройка multer для приёма одного файла audio
+// Настройка multer
 const upload = multer({ dest: 'uploads/' });
 
-// Создаём транспортер для отправки почты
+// Настройка почты
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
@@ -27,22 +28,23 @@ app.post('/submit', upload.single('audio'), async (req, res) => {
       return res.status(400).json({ success: false, message: 'Missing audio file' });
     }
 
-    // Прочитать quizAnswers из строки и распарсить JSON
-    const quizAnswers = req.body.quizAnswers ? JSON.parse(req.body.quizAnswers) : {};
-    const quizScore = req.body.quizScore || '-';
-    const quizPercentage = req.body.quizPercentage || '-';
-
-    // Извлечь basicInfo, если есть
+    // Извлечь и распарсить данные формы
     const {
       email = '-',
       fullname = '-',
       age = '-',
       country = '-',
-      languages = [],
+      languages = '',
       timezone = '-',
-      experience = '-'
-    } = quizAnswers.basicInfo || {};
+      experience = '-',
+      quizAnswers = '{}',
+      quizScore = '-',
+      quizPercentage = '-'
+    } = req.body;
 
+    const parsedLanguages = languages.split(',').map(l => l.trim());
+
+    // Формируем письмо
     const mailOptions = {
       from: process.env.EMAIL_USER,
       to: process.env.NOTIFY_TO,
@@ -54,16 +56,22 @@ app.post('/submit', upload.single('audio'), async (req, res) => {
         <p><strong>Страна:</strong> ${country}</p>
         <p><strong>Возраст:</strong> ${age}</p>
         <p><strong>Часовой пояс:</strong> ${timezone}</p>
-        <p><strong>Языки:</strong> ${languages.length ? languages.join(', ') : '-'}</p>
+        <p><strong>Языки:</strong> ${parsedLanguages.join(', ')}</p>
         <p><strong>Опыт:</strong> ${experience}</p>
         <p><strong>Тест:</strong> ${quizScore}/20 (${quizPercentage}%)</p>
-        <p><strong>Файл аудио:</strong> ${audioFile.filename}</p>
-      `
+      `,
+      attachments: [
+        {
+          filename: 'speaking-assessment.webm',
+          path: path.join(__dirname, audioFile.path)
+        }
+      ]
     };
 
     await transporter.sendMail(mailOptions);
 
     res.status(201).json({ success: true, message: 'Application submitted and email sent' });
+
   } catch (err) {
     console.error('Error submitting application:', err);
     res.status(500).json({ success: false, message: 'Internal server error', error: err.message });
