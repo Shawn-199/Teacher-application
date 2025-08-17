@@ -1,18 +1,25 @@
 {
   "name": "teacher-app-backend",
   "version": "1.0.0",
-  "main": "index.js",
+  "description": "Backend for teacher application and booking system",
+  "main": "server.js",
   "scripts": {
+    "start": "node server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": "",
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
+    "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",
     "dotenv": "^17.2.1",
     "express": "^5.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.17.1",
     "multer": "^2.0.2",
     "nodemailer": "^7.0.5"
   }
