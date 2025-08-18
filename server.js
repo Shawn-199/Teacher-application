@@ -1,3 +1,4 @@
+// server.js
 const express = require('express');
 const multer = require('multer');
 const cors = require('cors');
@@ -10,16 +11,15 @@ require('dotenv').config();
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// ---------- MongoDB ----------
+/* -------------------------- MongoDB -------------------------- */
 mongoose
   .connect(process.env.MONGO_URI, { dbName: 'grandenglish' })
   .then(() => console.log('MongoDB connected'))
   .catch((e) => console.error('Mongo connect error:', e));
 
-// ---------- Schemas ----------
 const { Schema, model } = mongoose;
 
 const UserSchema = new Schema(
@@ -28,10 +28,7 @@ const UserSchema = new Schema(
     passwordHash: { type: String, required: true },
     firstName: String,
     lastName: String,
-    role: { type: String, default: 'student' },
-    // на будущее (аватар, прогресс и т.п.)
-    avatarUrl: String,
-    level: { type: String, default: 'Beginner' }
+    role: { type: String, default: 'student' }
   },
   { timestamps: true }
 );
@@ -40,34 +37,42 @@ const User = model('User', UserSchema);
 const BookingSchema = new Schema(
   {
     user: { type: Schema.Types.ObjectId, ref: 'User', required: true },
-    email: { type: String, required: true },
+    email: { type: String, required: true },          // email родителя
     childName: { type: String, required: true },
     parentName: { type: String, required: true },
-    dateStr: { type: String, required: true }, // "Friday, July 28, 2023"
-    timeStr: { type: String, required: true }, // "2:00 PM"
-    level: { type: String, required: true },   // "Beginner" и т.п.
-    status: { type: String, default: 'Scheduled' } // Scheduled/Rescheduled/Cancelled/Done
+    dateStr: { type: String, required: true },         // "Friday, July 28, 2023"
+    timeStr: { type: String, required: true },         // "2:00 PM"
+    level:   { type: String, required: true },         // "Beginner" и т.п.
+    status:  { type: String, default: 'Scheduled' }    // Scheduled/Cancelled/Completed
   },
   { timestamps: true }
 );
 const Booking = model('Booking', BookingSchema);
 
-// ---------- Mail ----------
+/* -------------------------- Mailer --------------------------- */
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS }
 });
-const adminTo = process.env.ADMIN_BOOKINGS_TO || process.env.NOTIFY_TO || process.env.EMAIL_USER;
 
-// ---------- Utils ----------
+const ADMIN_TO = process.env.ADMIN_BOOKINGS_TO || process.env.NOTIFY_TO || process.env.EMAIL_USER;
+
+async function sendEmail(opts) {
+  try {
+    await transporter.sendMail({ from: `"Grand English Courses" <${process.env.EMAIL_USER}>`, ...opts });
+  } catch (e) {
+    console.error('Email error:', e.message);
+  }
+}
+
+/* -------------------------- Auth utils ----------------------- */
 function signToken(user) {
   return jwt.sign({ uid: user._id, email: user.email }, process.env.JWT_SECRET, { expiresIn: '30d' });
 }
 function auth(req, res, next) {
   try {
     const h = req.headers.authorization || '';
-    const token = h.startsWith('Bearer ') ? h.slice(7) : null;
-    if (!token) return res.status(401).json({ success: false, message: 'No auth token' });
+    const token = h.startsWith('Bearer ') ? h.slice(7) : '';
     const payload = jwt.verify(token, process.env.JWT_SECRET);
     req.user = payload; // { uid, email }
     next();
@@ -76,11 +81,29 @@ function auth(req, res, next) {
   }
 }
 
-// ---------- Health ----------
+/* -------------------------- Helpers -------------------------- */
+function parseBookingDT(b) {
+  // Пытаемся распарсить "Friday, July 28, 2023 2:00 PM"
+  const d = new Date(`${b.dateStr} ${b.timeStr}`);
+  return isNaN(+d) ? null : d;
+}
+async function autoCompletePastBookings(userId) {
+  const list = await Booking.find({ user: userId, status: 'Scheduled' });
+  const now = Date.now();
+  for (const b of list) {
+    const dt = parseBookingDT(b);
+    if (dt && dt.getTime() < now - 60 * 1000) {
+      b.status = 'Completed';
+      await b.save();
+    }
+  }
+}
+
+/* -------------------------- Health --------------------------- */
 app.get('/health', (req, res) => res.json({ ok: true }));
 
 /* =======================================================
-   A) СТАРЫЙ РОУТ: форма набора преподавателей (как было)
+   A) Форма набора преподавателей (как было)
    ======================================================= */
 const upload = multer({ dest: 'uploads/' });
 
@@ -106,9 +129,8 @@ app.post('/submit', upload.single('audio'), async (req, res) => {
 
     const parsedLanguages = languages ? languages.split(',').map(l => l.trim()) : [];
 
-    const mailOptions = {
-      from: process.env.EMAIL_USER,
-      to: process.env.NOTIFY_TO,
+    await sendEmail({
+      to: ADMIN_TO,
       subject: `🎓 Новая заявка от ${fullname}`,
       html: `
         <h2>Новая заявка</h2>
@@ -121,12 +143,9 @@ app.post('/submit', upload.single('audio'), async (req, res) => {
         <p><strong>Опыт:</strong> ${experience}</p>
         <p><strong>Тест:</strong> ${quizScore}/20 (${quizPercentage}%)</p>
       `,
-      attachments: [
-        { filename: 'speaking-assessment.webm', path: path.join(__dirname, audioFile.path) }
-      ]
-    };
+      attachments: [{ filename: 'speaking-assessment.webm', path: path.join(__dirname, audioFile.path) }]
+    });
 
-    await transporter.sendMail(mailOptions);
     res.status(201).json({ success: true, message: 'Application submitted and email sent' });
   } catch (err) {
     console.error('Error submitting application:', err);
@@ -135,7 +154,7 @@ app.post('/submit', upload.single('audio'), async (req, res) => {
 });
 
 /* =======================================================
-   B) АВТОРИЗАЦИЯ: регистрация / логин / профиль
+   B) Авторизация
    ======================================================= */
 app.post('/api/register', async (req, res) => {
   try {
@@ -187,13 +206,14 @@ app.post('/api/login', async (req, res) => {
 });
 
 app.get('/api/me', auth, async (req, res) => {
-  const user = await User.findById(req.user.uid).select('_id email firstName lastName role avatarUrl level');
+  const user = await User.findById(req.user.uid).select('_id email firstName lastName role');
   res.json({ success: true, user });
 });
 
 /* =======================================================
-   C) БРОНИРОВАНИЕ: create / my-bookings / cancel / reschedule
+   C) Бронирование
    ======================================================= */
+// Создать бронь
 app.post('/api/book', auth, async (req, res) => {
   try {
     const { email, childName, parentName, date, time, level } = req.body;
@@ -212,10 +232,9 @@ app.post('/api/book', auth, async (req, res) => {
       status: 'Scheduled'
     });
 
-    // Admin notify
-    await transporter.sendMail({
-      from: `"Grand English Courses" <${process.env.EMAIL_USER}>`,
-      to: adminTo,
+    // Письмо админу
+    await sendEmail({
+      to: ADMIN_TO,
       subject: `🗓 Новая бронь: ${childName} (${date} ${time})`,
       html: `
         <h2>Новая бронь пробного урока</h2>
@@ -224,22 +243,21 @@ app.post('/api/book', auth, async (req, res) => {
         <p><strong>Email:</strong> ${email}</p>
         <p><strong>Дата и время:</strong> ${date} в ${time}</p>
         <p><strong>Уровень:</strong> ${level}</p>
-        <p><strong>Статус:</strong> Scheduled</p>
       `
     });
 
-    // User notify
-    await transporter.sendMail({
-      from: `"Grand English Courses" <${process.env.EMAIL_USER}>`,
+    // Письмо пользователю
+    await sendEmail({
       to: email,
       subject: 'Your Trial Lesson Booking Confirmation',
       html: `
-        <h2>Booking Confirmed</h2>
+        <h2>Booking Confirmed!</h2>
         <p>Dear ${parentName},</p>
-        <p>Your trial lesson for <strong>${childName}</strong> has been scheduled.</p>
+        <p>Thank you for booking a trial lesson for <strong>${childName}</strong>.</p>
         <p><strong>Date & Time:</strong> ${date} at ${time}</p>
         <p><strong>Level:</strong> ${level}</p>
-        <p>Status: Scheduled</p>
+        <br/>
+        <p>We look forward to seeing you!</p>
         <p>— Grand English Courses</p>
       `
     });
@@ -251,49 +269,56 @@ app.post('/api/book', auth, async (req, res) => {
   }
 });
 
+// Мои брони (и авто-комплит прошедших)
 app.get('/api/my-bookings', auth, async (req, res) => {
-  const bookings = await Booking.find({ user: req.user.uid }).sort({ createdAt: -1 }).lean();
-  res.json({ success: true, bookings });
+  try {
+    await autoCompletePastBookings(req.user.uid);
+    const bookings = await Booking.find({ user: req.user.uid }).sort({ createdAt: -1 }).lean();
+    res.json({ success: true, bookings });
+  } catch (e) {
+    console.error('My bookings error:', e);
+    res.status(500).json({ success: false, message: 'Failed to load' });
+  }
 });
 
-// Cancel booking
-app.patch('/api/bookings/:id/cancel', auth, async (req, res) => {
+/* ===== Cancel / Reschedule эндпойнты + алиасы ===== */
+async function cancelHandler(req, res) {
   try {
-    const { reason = '' } = req.body;
-    const booking = await Booking.findOne({ _id: req.params.id, user: req.user.uid });
+    const id = req.params.id;
+    const booking = await Booking.findOne({ _id: id, user: req.user.uid });
     if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
+
+    // Нельзя отменить прошедший
+    const dt = parseBookingDT(booking);
+    if (dt && dt.getTime() < Date.now() - 60 * 1000) {
+      return res.status(400).json({ success: false, message: 'Lesson already completed' });
+    }
 
     booking.status = 'Cancelled';
     await booking.save();
 
-    // Admin email
-    await transporter.sendMail({
-      from: `"Grand English Courses" <${process.env.EMAIL_USER}>`,
-      to: adminTo,
+    // письма
+    await sendEmail({
+      to: ADMIN_TO,
       subject: `❌ Отмена брони: ${booking.childName} (${booking.dateStr} ${booking.timeStr})`,
       html: `
-        <h2>Бронь отменена пользователем</h2>
+        <h2>Отмена пробного урока</h2>
         <p><strong>Ребёнок:</strong> ${booking.childName}</p>
         <p><strong>Родитель:</strong> ${booking.parentName}</p>
         <p><strong>Email:</strong> ${booking.email}</p>
-        <p><strong>Изначально:</strong> ${booking.dateStr} at ${booking.timeStr}</p>
-        <p><strong>Причина:</strong> ${reason || '—'}</p>
+        <p><strong>Было назначено:</strong> ${booking.dateStr} в ${booking.timeStr}</p>
         <p><strong>Статус:</strong> Cancelled</p>
       `
     });
-
-    // User email
-    await transporter.sendMail({
-      from: `"Grand English Courses" <${process.env.EMAIL_USER}>`,
+    await sendEmail({
       to: booking.email,
-      subject: 'Your Trial Lesson Has Been Cancelled',
+      subject: 'Your Trial Lesson Was Cancelled',
       html: `
         <h2>Booking Cancelled</h2>
         <p>Dear ${booking.parentName},</p>
-        <p>Your trial lesson for <strong>${booking.childName}</strong> has been cancelled.</p>
-        <p><strong>Original date & time:</strong> ${booking.dateStr} at ${booking.timeStr}</p>
-        <p>${reason ? `Reason provided: ${reason}` : ''}</p>
-        <p>Status: Cancelled</p>
+        <p>Your trial lesson for <strong>${booking.childName}</strong> scheduled on <strong>${booking.dateStr} at ${booking.timeStr}</strong> has been cancelled.</p>
+        <p>If you want to book a new time, please use our booking page.</p>
+        <p>— Grand English Courses</p>
       `
     });
 
@@ -302,55 +327,55 @@ app.patch('/api/bookings/:id/cancel', auth, async (req, res) => {
     console.error('Cancel error:', e);
     res.status(500).json({ success: false, message: 'Cancel failed' });
   }
-});
+}
 
-// Reschedule booking
-app.patch('/api/bookings/:id/reschedule', auth, async (req, res) => {
+async function rescheduleHandler(req, res) {
   try {
-    const { newDate, newTime } = req.body;
-    if (!newDate || !newTime) {
-      return res.status(400).json({ success: false, message: 'newDate and newTime required' });
-    }
+    const id = req.params.id;
+    const { date, time, level } = req.body || {};
+    if (!date || !time) return res.status(400).json({ success: false, message: 'date & time required' });
 
-    const booking = await Booking.findOne({ _id: req.params.id, user: req.user.uid });
+    const booking = await Booking.findOne({ _id: id, user: req.user.uid });
     if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
 
-    const oldDate = booking.dateStr;
-    const oldTime = booking.timeStr;
+    // Нельзя переносить прошедший
+    const oldDt = parseBookingDT(booking);
+    if (oldDt && oldDt.getTime() < Date.now() - 60 * 1000) {
+      return res.status(400).json({ success: false, message: 'Lesson already completed' });
+    }
 
-    booking.dateStr = newDate;
-    booking.timeStr = newTime;
-    booking.status = 'Rescheduled';
+    const prev = { dateStr: booking.dateStr, timeStr: booking.timeStr, level: booking.level };
+
+    booking.dateStr = date;
+    booking.timeStr = time;
+    if (level) booking.level = level;
+    booking.status = 'Scheduled';
     await booking.save();
 
-    // Admin email
-    await transporter.sendMail({
-      from: `"Grand English Courses" <${process.env.EMAIL_USER}>`,
-      to: adminTo,
-      subject: `🔁 Перенос брони: ${booking.childName} на ${newDate} ${newTime}`,
+    // письма
+    await sendEmail({
+      to: ADMIN_TO,
+      subject: `🔄 Перенос брони: ${booking.childName} → ${date} ${time}`,
       html: `
-        <h2>Бронь перенесена пользователем</h2>
+        <h2>Перенос пробного урока</h2>
         <p><strong>Ребёнок:</strong> ${booking.childName}</p>
         <p><strong>Родитель:</strong> ${booking.parentName}</p>
         <p><strong>Email:</strong> ${booking.email}</p>
-        <p><strong>Было:</strong> ${oldDate} at ${oldTime}</p>
-        <p><strong>Стало:</strong> ${newDate} at ${newTime}</p>
-        <p><strong>Статус:</strong> Rescheduled</p>
+        <p><strong>Было:</strong> ${prev.dateStr} в ${prev.timeStr}</p>
+        <p><strong>Стало:</strong> ${date} в ${time}</p>
+        <p><strong>Уровень:</strong> ${booking.level}</p>
       `
     });
-
-    // User email
-    await transporter.sendMail({
-      from: `"Grand English Courses" <${process.env.EMAIL_USER}>`,
+    await sendEmail({
       to: booking.email,
-      subject: 'Your Trial Lesson Has Been Rescheduled',
+      subject: 'Your Trial Lesson Was Rescheduled',
       html: `
         <h2>Booking Rescheduled</h2>
         <p>Dear ${booking.parentName},</p>
         <p>Your trial lesson for <strong>${booking.childName}</strong> has been rescheduled.</p>
-        <p><strong>Previous:</strong> ${oldDate} at ${oldTime}</p>
-        <p><strong>New date & time:</strong> ${newDate} at ${newTime}</p>
-        <p>Status: Rescheduled</p>
+        <p><strong>New Date & Time:</strong> ${date} at ${time}</p>
+        <p><strong>Level:</strong> ${booking.level}</p>
+        <p>— Grand English Courses</p>
       `
     });
 
@@ -359,7 +384,16 @@ app.patch('/api/bookings/:id/reschedule', auth, async (req, res) => {
     console.error('Reschedule error:', e);
     res.status(500).json({ success: false, message: 'Reschedule failed' });
   }
-});
+}
 
+// маршруты
+app.post('/api/bookings/:id/cancel', auth, cancelHandler);
+app.post('/api/bookings/:id/reschedule', auth, rescheduleHandler);
+
+// алиасы на старые пути (на случай если фронт дергает их)
+app.post('/api/book/:id/cancel', auth, cancelHandler);
+app.post('/api/book/:id/reschedule', auth, rescheduleHandler);
+
+/* -------------------------- Start ---------------------------- */
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server is running on port ${PORT}`));
