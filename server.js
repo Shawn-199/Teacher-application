@@ -34,16 +34,25 @@ const UserSchema = new Schema(
 );
 const User = model('User', UserSchema);
 
+/**
+ * Booking:
+ * + country   (String)
+ * + timeZone  (String; e.g. "Asia/Dushanbe")
+ * + childAge  (Number)
+ */
 const BookingSchema = new Schema(
   {
     user: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     email: { type: String, required: true },          // email родителя
     childName: { type: String, required: true },
     parentName: { type: String, required: true },
-    dateStr: { type: String, required: true },         // "Friday, July 28, 2023"
-    timeStr: { type: String, required: true },         // "2:00 PM"
-    level:   { type: String, required: true },         // "Beginner" и т.п.
-    status:  { type: String, default: 'Scheduled' }    // Scheduled/Cancelled/Completed
+    childAge: { type: Number },                       // ← добавлено
+    country: { type: String },                        // ← добавлено
+    timeZone: { type: String },                       // ← добавлено
+    dateStr: { type: String, required: true },        // "Friday, July 28, 2023"
+    timeStr: { type: String, required: true },        // "2:00 PM"
+    level:   { type: String, required: true },        // "Beginner" и т.п.
+    status:  { type: String, default: 'Scheduled' }   // Scheduled/Cancelled/Completed
   },
   { timestamps: true }
 );
@@ -216,46 +225,66 @@ app.get('/api/me', auth, async (req, res) => {
 // Создать бронь
 app.post('/api/book', auth, async (req, res) => {
   try {
-    const { email, childName, parentName, date, time, level } = req.body;
+    const {
+      email,
+      childName,
+      parentName,
+      date,
+      time,
+      level,
+      country,
+      timeZone,
+      childAge
+    } = req.body;
+
+    // делаем базовую валидацию обязательных полей
     if (!email || !childName || !parentName || !date || !time || !level) {
       return res.status(400).json({ success: false, message: 'Missing fields' });
     }
 
     const booking = await Booking.create({
       user: req.user.uid,
-      email: email.toLowerCase(),
+      email: String(email).toLowerCase(),
       childName,
       parentName,
+      childAge: typeof childAge === 'number' ? childAge : (childAge ? Number(childAge) : undefined),
+      country,
+      timeZone,
       dateStr: date,
       timeStr: time,
       level,
       status: 'Scheduled'
     });
 
-    // Письмо админу
+    /* -------- Письмо админу (включая страну/таймзону/возраст) -------- */
     await sendEmail({
       to: ADMIN_TO,
       subject: `🗓 Новая бронь: ${childName} (${date} ${time})`,
       html: `
         <h2>Новая бронь пробного урока</h2>
-        <p><strong>Ребёнок:</strong> ${childName}</p>
+        <p><strong>Ребёнок:</strong> ${childName}${childAge ? `, ${childAge} y.o.` : ''}</p>
         <p><strong>Родитель:</strong> ${parentName}</p>
         <p><strong>Email:</strong> ${email}</p>
         <p><strong>Дата и время:</strong> ${date} в ${time}</p>
         <p><strong>Уровень:</strong> ${level}</p>
+        ${country ? `<p><strong>Страна:</strong> ${country}</p>` : ''}
+        ${timeZone ? `<p><strong>Time Zone:</strong> ${timeZone}</p>` : ''}
       `
     });
 
-    // Письмо пользователю
+    /* -------- Письмо пользователю (включая страну/таймзону/возраст) -------- */
     await sendEmail({
       to: email,
       subject: 'Your Trial Lesson Booking Confirmation',
       html: `
         <h2>Booking Confirmed!</h2>
         <p>Dear ${parentName},</p>
-        <p>Thank you for booking a trial lesson for <strong>${childName}</strong>.</p>
-        <p><strong>Date & Time:</strong> ${date} at ${time}</p>
+        <p>Thank you for booking a trial lesson for <strong>${childName}</strong>${childAge ? ` (${childAge} y.o.)` : ''}.</p>
+        <p><strong>Date & Time:</strong> ${date} at ${time}${timeZone ? ` (${timeZone})` : ''}</p>
         <p><strong>Level:</strong> ${level}</p>
+        ${country ? `<p><strong>Country:</strong> ${country}</p>` : ''}
+        ${timeZone ? `<p><strong>Time Zone:</strong> ${timeZone}</p>` : ''}
+        ${childAge ? `<p><strong>Child’s Age:</strong> ${childAge}</p>` : ''}
         <br/>
         <p>We look forward to seeing you!</p>
         <p>— Grand English Courses</p>
@@ -297,16 +326,17 @@ async function cancelHandler(req, res) {
     booking.status = 'Cancelled';
     await booking.save();
 
-    // письма
+    // письма (добавили страну/таймзону/возраст для контекста)
     await sendEmail({
       to: ADMIN_TO,
       subject: `❌ Отмена брони: ${booking.childName} (${booking.dateStr} ${booking.timeStr})`,
       html: `
         <h2>Отмена пробного урока</h2>
-        <p><strong>Ребёнок:</strong> ${booking.childName}</p>
+        <p><strong>Ребёнок:</strong> ${booking.childName}${booking.childAge ? `, ${booking.childAge} y.o.` : ''}</p>
         <p><strong>Родитель:</strong> ${booking.parentName}</p>
         <p><strong>Email:</strong> ${booking.email}</p>
-        <p><strong>Было назначено:</strong> ${booking.dateStr} в ${booking.timeStr}</p>
+        <p><strong>Было назначено:</strong> ${booking.dateStr} в ${booking.timeStr}${booking.timeZone ? ` (${booking.timeZone})` : ''}</p>
+        ${booking.country ? `<p><strong>Страна:</strong> ${booking.country}</p>` : ''}
         <p><strong>Статус:</strong> Cancelled</p>
       `
     });
@@ -316,7 +346,9 @@ async function cancelHandler(req, res) {
       html: `
         <h2>Booking Cancelled</h2>
         <p>Dear ${booking.parentName},</p>
-        <p>Your trial lesson for <strong>${booking.childName}</strong> scheduled on <strong>${booking.dateStr} at ${booking.timeStr}</strong> has been cancelled.</p>
+        <p>Your trial lesson for <strong>${booking.childName}</strong> scheduled on <strong>${booking.dateStr} at ${booking.timeStr}</strong>${booking.timeZone ? ` (${booking.timeZone})` : ''} has been cancelled.</p>
+        ${booking.country ? `<p><strong>Country:</strong> ${booking.country}</p>` : ''}
+        ${booking.childAge ? `<p><strong>Child’s Age:</strong> ${booking.childAge}</p>` : ''}
         <p>If you want to book a new time, please use our booking page.</p>
         <p>— Grand English Courses</p>
       `
@@ -352,17 +384,18 @@ async function rescheduleHandler(req, res) {
     booking.status = 'Scheduled';
     await booking.save();
 
-    // письма
+    // письма (с контекстом страны/таймзоны/возраста)
     await sendEmail({
       to: ADMIN_TO,
       subject: `🔄 Перенос брони: ${booking.childName} → ${date} ${time}`,
       html: `
         <h2>Перенос пробного урока</h2>
-        <p><strong>Ребёнок:</strong> ${booking.childName}</p>
+        <p><strong>Ребёнок:</strong> ${booking.childName}${booking.childAge ? `, ${booking.childAge} y.o.` : ''}</p>
         <p><strong>Родитель:</strong> ${booking.parentName}</p>
         <p><strong>Email:</strong> ${booking.email}</p>
         <p><strong>Было:</strong> ${prev.dateStr} в ${prev.timeStr}</p>
-        <p><strong>Стало:</strong> ${date} в ${time}</p>
+        <p><strong>Стало:</strong> ${date} в ${time}${booking.timeZone ? ` (${booking.timeZone})` : ''}</p>
+        ${booking.country ? `<p><strong>Страна:</strong> ${booking.country}</p>` : ''}
         <p><strong>Уровень:</strong> ${booking.level}</p>
       `
     });
@@ -372,9 +405,10 @@ async function rescheduleHandler(req, res) {
       html: `
         <h2>Booking Rescheduled</h2>
         <p>Dear ${booking.parentName},</p>
-        <p>Your trial lesson for <strong>${booking.childName}</strong> has been rescheduled.</p>
-        <p><strong>New Date & Time:</strong> ${date} at ${time}</p>
+        <p>Your trial lesson for <strong>${booking.childName}</strong>${booking.childAge ? ` (${booking.childAge} y.o.)` : ''} has been rescheduled.</p>
+        <p><strong>New Date & Time:</strong> ${date} at ${time}${booking.timeZone ? ` (${booking.timeZone})` : ''}</p>
         <p><strong>Level:</strong> ${booking.level}</p>
+        ${booking.country ? `<p><strong>Country:</strong> ${booking.country}</p>` : ''}
         <p>— Grand English Courses</p>
       `
     });
