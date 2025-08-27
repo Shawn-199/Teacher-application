@@ -1,4 +1,4 @@
-// server.js
+// server.js  (patched: memoryStorage + multi-audio support)
 const express = require('express');
 const multer = require('multer');
 const cors = require('cors');
@@ -10,133 +10,121 @@ const jwt = require('jsonwebtoken');
 require('dotenv').config();
 
 const app = express();
-app.use(cors());
+app.use(cors({ origin: '*', credentials: true }));
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-/* -------------------------- MongoDB -------------------------- */
+/* ---------------- MongoDB ---------------- */
+if (!process.env.MONGO_URI) {
+  console.error('Missing MONGO_URI in .env');
+  process.exit(1);
+}
 mongoose
   .connect(process.env.MONGO_URI, { dbName: 'grandenglish' })
   .then(() => console.log('MongoDB connected'))
-  .catch((e) => console.error('Mongo connect error:', e));
+  .catch((e) => { console.error('Mongo connect error:', e); process.exit(1); });
 
 const { Schema, model } = mongoose;
 
-const UserSchema = new Schema(
-  {
-    email: { type: String, unique: true, required: true, index: true },
-    passwordHash: { type: String, required: true },
-    firstName: String,
-    lastName: String,
-    role: { type: String, default: 'student' }
-  },
-  { timestamps: true }
-);
+const UserSchema = new Schema({
+  email: { type: String, unique: true, required: true, index: true },
+  passwordHash: { type: String, required: true },
+  firstName: String,
+  lastName: String,
+  role: { type: String, default: 'student' }
+}, { timestamps: true });
 const User = model('User', UserSchema);
 
-/**
- * Booking:
- * + country   (String)
- * + timeZone  (String; e.g. "Asia/Dushanbe")
- * + childAge  (Number)
- */
-const BookingSchema = new Schema(
-  {
-    user: { type: Schema.Types.ObjectId, ref: 'User', required: true },
-    email: { type: String, required: true },          // email родителя
-    childName: { type: String, required: true },
-    parentName: { type: String, required: true },
-    childAge: { type: Number },                       // ← добавлено
-    country: { type: String },                        // ← добавлено
-    timeZone: { type: String },                       // ← добавлено
-    dateStr: { type: String, required: true },        // "Friday, July 28, 2023"
-    timeStr: { type: String, required: true },        // "2:00 PM"
-    level:   { type: String, required: true },        // "Beginner" и т.п.
-    status:  { type: String, default: 'Scheduled' }   // Scheduled/Cancelled/Completed
-  },
-  { timestamps: true }
-);
+const BookingSchema = new Schema({
+  user: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+  email: { type: String, required: true },
+  childName: { type: String, required: true },
+  parentName: { type: String, required: true },
+  childAge: { type: Number },
+  country: { type: String },
+  timeZone: { type: String },
+  dateStr: { type: String, required: true },   // 'YYYY-MM-DD'
+  timeStr: { type: String, required: true },   // 'HH:MM' or 'HH:MM - HH:MM'
+  level:   { type: String, required: true },
+  status:  { type: String, default: 'Scheduled' }, // Scheduled | Confirmed | Completed | Cancelled
+  teacherName: { type: String, default: process.env.TEACHER_NAME || 'Teacher' }
+}, { timestamps: true });
 const Booking = model('Booking', BookingSchema);
 
-/* -------------------------- Mailer --------------------------- */
+/* ---------------- Mailer ---------------- */
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS }
 });
-
 const ADMIN_TO = process.env.ADMIN_BOOKINGS_TO || process.env.NOTIFY_TO || process.env.EMAIL_USER;
 
 async function sendEmail(opts) {
   try {
     await transporter.sendMail({ from: `"Grand English Courses" <${process.env.EMAIL_USER}>`, ...opts });
-  } catch (e) {
-    console.error('Email error:', e.message);
-  }
+  } catch (e) { console.error('Email error:', e.message); }
 }
 
-/* -------------------------- Auth utils ----------------------- */
+/* ---------------- JWT ---------------- */
 function signToken(user) {
+  if (!process.env.JWT_SECRET) throw new Error('Missing JWT_SECRET in .env');
   return jwt.sign({ uid: user._id, email: user.email }, process.env.JWT_SECRET, { expiresIn: '30d' });
 }
 function auth(req, res, next) {
   try {
     const h = req.headers.authorization || '';
-    const token = h.startsWith('Bearer ') ? h.slice(7) : '';
-    const payload = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = payload; // { uid, email }
+    const theToken = h.startsWith('Bearer ') ? h.slice(7) : '';
+    const payload = jwt.verify(theToken, process.env.JWT_SECRET);
+    req.user = payload;
     next();
-  } catch (e) {
-    return res.status(401).json({ success: false, message: 'Invalid auth token' });
-  }
+  } catch { return res.status(401).json({ success:false, message:'Invalid auth token' }); }
 }
 
-/* -------------------------- Helpers -------------------------- */
-function parseBookingDT(b) {
-  // Пытаемся распарсить "Friday, July 28, 2023 2:00 PM"
-  const d = new Date(`${b.dateStr} ${b.timeStr}`);
-  return isNaN(+d) ? null : d;
-}
-async function autoCompletePastBookings(userId) {
-  const list = await Booking.find({ user: userId, status: 'Scheduled' });
-  const now = Date.now();
-  for (const b of list) {
-    const dt = parseBookingDT(b);
-    if (dt && dt.getTime() < now - 60 * 1000) {
-      b.status = 'Completed';
-      await b.save();
-    }
-  }
-}
-
-/* -------------------------- Health --------------------------- */
+/* ---------------- Health ---------------- */
 app.get('/health', (req, res) => res.json({ ok: true }));
 
-/* =======================================================
-   A) Форма набора преподавателей (как было)
-   ======================================================= */
-const upload = multer({ dest: 'uploads/' });
+/* ---------------- Teachers form (audio) ---------------- */
+// ✅ Переход на память: никаких каталогов на диске не требуется
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 25 * 1024 * 1024 } // до 25 МБ на файл
+});
 
-app.post('/submit', upload.single('audio'), async (req, res) => {
+// Принимаем любые поля, но нам интересны audio / audioQ1 / audioQ2
+app.post('/submit', upload.any(), async (req, res) => {
   try {
-    const audioFile = req.file;
-    if (!audioFile) {
-      return res.status(400).json({ success: false, message: 'Missing audio file' });
+    // Поддержка разных названий
+    const files = {};
+    for (const f of (req.files || [])) {
+      files[f.fieldname] = f;
+    }
+    const audio =
+      files['audio'] || files['audioQ2'] || files['audioQ1'] || null;
+
+    if (!audio) {
+      return res.status(400).json({ success: false, message: 'Missing audio file (audio, audioQ1 or audioQ2)' });
     }
 
     const {
-      email = '-',
-      fullname = '-',
-      age = '-',
-      country = '-',
-      languages = '',
-      timezone = '-',
-      experience = '-',
-      quizAnswers = '{}',
-      quizScore = '-',
-      quizPercentage = '-'
+      email='-', fullname='-', age='-', country='-', languages='',
+      timezone='-', experience='-', quizAnswers='{}', quizScore='-', quizPercentage='-'
     } = req.body;
 
-    const parsedLanguages = languages ? languages.split(',').map(l => l.trim()) : [];
+    const parsedLanguages = languages ? String(languages).split(',').map(l=>l.trim()) : [];
+
+    // Формируем вложения: если пришли оба — отправим оба
+    const attachments = [];
+    const mk = (f, fallbackName) => f && ({
+      filename: f.originalname || fallbackName,
+      content: f.buffer,
+      contentType: f.mimetype || 'audio/webm'
+    });
+    const a1 = mk(files['audioQ1'], 'speaking-q1.webm');
+    const a2 = mk(files['audioQ2'], 'speaking-q2.webm');
+    const aMain = mk(files['audio'], 'speaking-assessment.webm');
+
+    if (a1) attachments.push(a1);
+    if (a2) attachments.push(a2);
+    if (!a1 && !a2 && aMain) attachments.push(aMain); // если только одно поле
 
     await sendEmail({
       to: ADMIN_TO,
@@ -152,282 +140,144 @@ app.post('/submit', upload.single('audio'), async (req, res) => {
         <p><strong>Опыт:</strong> ${experience}</p>
         <p><strong>Тест:</strong> ${quizScore}/20 (${quizPercentage}%)</p>
       `,
-      attachments: [{ filename: 'speaking-assessment.webm', path: path.join(__dirname, audioFile.path) }]
+      attachments
     });
 
-    res.status(201).json({ success: true, message: 'Application submitted and email sent' });
+    res.status(201).json({ success:true, message:'Application submitted and email sent' });
   } catch (err) {
     console.error('Error submitting application:', err);
-    res.status(500).json({ success: false, message: 'Internal server error', error: err.message });
+    res.status(500).json({ success:false, message:'Internal server error', error: err.message });
   }
 });
 
-/* =======================================================
-   B) Авторизация
-   ======================================================= */
+/* ---------------- Auth APIs ---------------- */
 app.post('/api/register', async (req, res) => {
   try {
     const { fullName, email, password } = req.body;
-    if (!fullName || !email || !password) {
-      return res.status(400).json({ success: false, message: 'fullName, email, password required' });
-    }
-    const exists = await User.findOne({ email: email.toLowerCase() });
-    if (exists) return res.status(409).json({ success: false, message: 'User already exists' });
+    if (!fullName || !email || !password)
+      return res.status(400).json({ success:false, message:'fullName, email, password required' });
 
-    const [firstName = '', ...rest] = fullName.trim().split(' ');
+    const exists = await User.findOne({ email: email.toLowerCase() });
+    if (exists) return res.status(409).json({ success:false, message:'User already exists' });
+
+    const [firstName='', ...rest] = fullName.trim().split(' ');
     const lastName = rest.join(' ');
     const passwordHash = await bcrypt.hash(password, 10);
 
     const user = await User.create({
-      email: email.toLowerCase(),
-      passwordHash,
-      firstName,
-      lastName,
-      role: 'student'
+      email: email.toLowerCase(), passwordHash, firstName, lastName, role:'student'
     });
 
     const token = signToken(user);
-    res.json({ success: true, token, user: { id: user._id, email: user.email, firstName, lastName } });
+    res.json({ success:true, token, user:{ id:user._id, email:user.email, firstName, lastName } });
   } catch (e) {
     console.error('Register error:', e);
-    res.status(500).json({ success: false, message: 'Registration failed' });
+    res.status(500).json({ success:false, message:'Registration failed' });
   }
 });
 
 app.post('/api/login', async (req, res) => {
   try {
     const { email, password } = req.body;
-    const user = await User.findOne({ email: (email || '').toLowerCase() });
-    if (!user) return res.status(401).json({ success: false, message: 'Invalid credentials' });
-    const ok = await bcrypt.compare(password, user.passwordHash);
-    if (!ok) return res.status(401).json({ success: false, message: 'Invalid credentials' });
+    const user = await User.findOne({ email:(email||'').toLowerCase() });
+    if (!user) return res.status(401).json({ success:false, message:'Invalid credentials' });
+  const ok = await bcrypt.compare(password, user.passwordHash);
+    if (!ok) return res.status(401).json({ success:false, message:'Invalid credentials' });
 
     const token = signToken(user);
-    res.json({
-      success: true,
-      token,
-      user: { id: user._id, email: user.email, firstName: user.firstName, lastName: user.lastName }
-    });
+    res.json({ success:true, token, user:{ id:user._id, email:user.email, firstName:user.firstName, lastName:user.lastName } });
   } catch (e) {
     console.error('Login error:', e);
-    res.status(500).json({ success: false, message: 'Login failed' });
+    res.status(500).json({ success:false, message:'Login failed' });
   }
 });
 
 app.get('/api/me', auth, async (req, res) => {
   const user = await User.findById(req.user.uid).select('_id email firstName lastName role');
-  res.json({ success: true, user });
+  res.json({ success:true, user });
 });
 
-/* =======================================================
-   C) Бронирование
-   ======================================================= */
-// Создать бронь
+/* ---------------- Bookings (no schedule dependency) ---------------- */
 app.post('/api/book', auth, async (req, res) => {
   try {
-    const {
-      email,
-      childName,
-      parentName,
-      date,
-      time,
-      level,
-      country,
-      timeZone,
-      childAge
-    } = req.body;
-
-    // делаем базовую валидацию обязательных полей
-    if (!email || !childName || !parentName || !date || !time || !level) {
-      return res.status(400).json({ success: false, message: 'Missing fields' });
+    const { email, childName, parentName, childAge, country, timeZone, date, time, level } = req.body;
+    if (!date || !time || !childName || !parentName || !email || !level) {
+      return res.status(400).json({ success:false, message:'Missing required fields' });
     }
 
     const booking = await Booking.create({
       user: req.user.uid,
-      email: String(email).toLowerCase(),
-      childName,
-      parentName,
-      childAge: typeof childAge === 'number' ? childAge : (childAge ? Number(childAge) : undefined),
-      country,
-      timeZone,
-      dateStr: date,
-      timeStr: time,
-      level,
-      status: 'Scheduled'
+      email, childName, parentName, childAge, country, timeZone,
+      dateStr: date, timeStr: time, level,
+      status: 'Scheduled',
+      teacherName: process.env.TEACHER_NAME || 'Teacher'
     });
 
-    /* -------- Письмо админу (включая страну/таймзону/возраст) -------- */
+    // Notify admin
     await sendEmail({
       to: ADMIN_TO,
-      subject: `🗓 Новая бронь: ${childName} (${date} ${time})`,
+      subject: `🗓️ New trial booking: ${childName} (${date} ${time})`,
       html: `
-        <h2>Новая бронь пробного урока</h2>
-        <p><strong>Ребёнок:</strong> ${childName}${childAge ? `, ${childAge} y.o.` : ''}</p>
-        <p><strong>Родитель:</strong> ${parentName}</p>
+        <h2>New booking</h2>
+        <p><strong>Child:</strong> ${childName}</p>
+        <p><strong>Parent:</strong> ${parentName}</p>
         <p><strong>Email:</strong> ${email}</p>
-        <p><strong>Дата и время:</strong> ${date} в ${time}</p>
-        <p><strong>Уровень:</strong> ${level}</p>
-        ${country ? `<p><strong>Страна:</strong> ${country}</p>` : ''}
-        ${timeZone ? `<p><strong>Time Zone:</strong> ${timeZone}</p>` : ''}
-      `
-    });
-
-    /* -------- Письмо пользователю (включая страну/таймзону/возраст) -------- */
-    await sendEmail({
-      to: email,
-      subject: 'Your Trial Lesson Booking Confirmation',
-      html: `
-        <h2>Booking Confirmed!</h2>
-        <p>Dear ${parentName},</p>
-        <p>Thank you for booking a trial lesson for <strong>${childName}</strong>${childAge ? ` (${childAge} y.o.)` : ''}.</p>
-        <p><strong>Date & Time:</strong> ${date} at ${time}${timeZone ? ` (${timeZone})` : ''}</p>
         <p><strong>Level:</strong> ${level}</p>
-        ${country ? `<p><strong>Country:</strong> ${country}</p>` : ''}
-        ${timeZone ? `<p><strong>Time Zone:</strong> ${timeZone}</p>` : ''}
-        ${childAge ? `<p><strong>Child’s Age:</strong> ${childAge}</p>` : ''}
-        <br/>
-        <p>We look forward to seeing you!</p>
-        <p>— Grand English Courses</p>
+        <p><strong>Date & Time:</strong> ${date} ${time} (${timeZone||'—'})</p>
+        <p><strong>Country:</strong> ${country||'—'}</p>
       `
     });
 
-    res.json({ success: true, bookingId: booking._id });
+    res.json({ success:true, booking });
   } catch (e) {
     console.error('Book error:', e);
-    res.status(500).json({ success: false, message: 'Booking failed' });
+    res.status(500).json({ success:false, message:'Booking failed' });
   }
 });
 
-// Мои брони (и авто-комплит прошедших)
 app.get('/api/my-bookings', auth, async (req, res) => {
   try {
-    await autoCompletePastBookings(req.user.uid);
-    const bookings = await Booking.find({ user: req.user.uid }).sort({ createdAt: -1 }).lean();
-    res.json({ success: true, bookings });
+    const items = await Booking.find({ user: req.user.uid }).sort({ createdAt: -1 }).lean();
+    res.json({ success:true, bookings: items });
   } catch (e) {
-    console.error('My bookings error:', e);
-    res.status(500).json({ success: false, message: 'Failed to load' });
+    console.error('List bookings error:', e);
+    res.status(500).json({ success:false, message:'Failed to list bookings' });
   }
 });
 
-/* ===== Cancel / Reschedule эндпойнты + алиасы ===== */
-async function cancelHandler(req, res) {
+app.post('/api/bookings/:id/cancel', auth, async (req, res) => {
   try {
-    const id = req.params.id;
-    const booking = await Booking.findOne({ _id: id, user: req.user.uid });
-    if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
-
-    // Нельзя отменить прошедший
-    const dt = parseBookingDT(booking);
-    if (dt && dt.getTime() < Date.now() - 60 * 1000) {
-      return res.status(400).json({ success: false, message: 'Lesson already completed' });
-    }
-
-    booking.status = 'Cancelled';
-    await booking.save();
-
-    // письма (добавили страну/таймзону/возраст для контекста)
-    await sendEmail({
-      to: ADMIN_TO,
-      subject: `❌ Отмена брони: ${booking.childName} (${booking.dateStr} ${booking.timeStr})`,
-      html: `
-        <h2>Отмена пробного урока</h2>
-        <p><strong>Ребёнок:</strong> ${booking.childName}${booking.childAge ? `, ${booking.childAge} y.o.` : ''}</p>
-        <p><strong>Родитель:</strong> ${booking.parentName}</p>
-        <p><strong>Email:</strong> ${booking.email}</p>
-        <p><strong>Было назначено:</strong> ${booking.dateStr} в ${booking.timeStr}${booking.timeZone ? ` (${booking.timeZone})` : ''}</p>
-        ${booking.country ? `<p><strong>Страна:</strong> ${booking.country}</p>` : ''}
-        <p><strong>Статус:</strong> Cancelled</p>
-      `
-    });
-    await sendEmail({
-      to: booking.email,
-      subject: 'Your Trial Lesson Was Cancelled',
-      html: `
-        <h2>Booking Cancelled</h2>
-        <p>Dear ${booking.parentName},</p>
-        <p>Your trial lesson for <strong>${booking.childName}</strong> scheduled on <strong>${booking.dateStr} at ${booking.timeStr}</strong>${booking.timeZone ? ` (${booking.timeZone})` : ''} has been cancelled.</p>
-        ${booking.country ? `<p><strong>Country:</strong> ${booking.country}</p>` : ''}
-        ${booking.childAge ? `<p><strong>Child’s Age:</strong> ${booking.childAge}</p>` : ''}
-        <p>If you want to book a new time, please use our booking page.</p>
-        <p>— Grand English Courses</p>
-      `
-    });
-
-    res.json({ success: true });
+    const { id } = req.params;
+    const b = await Booking.findOne({ _id: id, user: req.user.uid });
+    if (!b) return res.status(404).json({ success:false, message:'Not found' });
+    b.status = 'Cancelled';
+    await b.save();
+    res.json({ success:true, booking: b });
   } catch (e) {
     console.error('Cancel error:', e);
-    res.status(500).json({ success: false, message: 'Cancel failed' });
+    res.status(500).json({ success:false, message:'Cancel failed' });
   }
-}
+});
 
-async function rescheduleHandler(req, res) {
+app.post('/api/bookings/:id/reschedule', auth, async (req, res) => {
   try {
-    const id = req.params.id;
-    const { date, time, level } = req.body || {};
-    if (!date || !time) return res.status(400).json({ success: false, message: 'date & time required' });
-
-    const booking = await Booking.findOne({ _id: id, user: req.user.uid });
-    if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
-
-    // Нельзя переносить прошедший
-    const oldDt = parseBookingDT(booking);
-    if (oldDt && oldDt.getTime() < Date.now() - 60 * 1000) {
-      return res.status(400).json({ success: false, message: 'Lesson already completed' });
-    }
-
-    const prev = { dateStr: booking.dateStr, timeStr: booking.timeStr, level: booking.level };
-
-    booking.dateStr = date;
-    booking.timeStr = time;
-    if (level) booking.level = level;
-    booking.status = 'Scheduled';
-    await booking.save();
-
-    // письма (с контекстом страны/таймзоны/возраста)
-    await sendEmail({
-      to: ADMIN_TO,
-      subject: `🔄 Перенос брони: ${booking.childName} → ${date} ${time}`,
-      html: `
-        <h2>Перенос пробного урока</h2>
-        <p><strong>Ребёнок:</strong> ${booking.childName}${booking.childAge ? `, ${booking.childAge} y.o.` : ''}</p>
-        <p><strong>Родитель:</strong> ${booking.parentName}</p>
-        <p><strong>Email:</strong> ${booking.email}</p>
-        <p><strong>Было:</strong> ${prev.dateStr} в ${prev.timeStr}</p>
-        <p><strong>Стало:</strong> ${date} в ${time}${booking.timeZone ? ` (${booking.timeZone})` : ''}</p>
-        ${booking.country ? `<p><strong>Страна:</strong> ${booking.country}</p>` : ''}
-        <p><strong>Уровень:</strong> ${booking.level}</p>
-      `
-    });
-    await sendEmail({
-      to: booking.email,
-      subject: 'Your Trial Lesson Was Rescheduled',
-      html: `
-        <h2>Booking Rescheduled</h2>
-        <p>Dear ${booking.parentName},</p>
-        <p>Your trial lesson for <strong>${booking.childName}</strong>${booking.childAge ? ` (${booking.childAge} y.o.)` : ''} has been rescheduled.</p>
-        <p><strong>New Date & Time:</strong> ${date} at ${time}${booking.timeZone ? ` (${booking.timeZone})` : ''}</p>
-        <p><strong>Level:</strong> ${booking.level}</p>
-        ${booking.country ? `<p><strong>Country:</strong> ${booking.country}</p>` : ''}
-        <p>— Grand English Courses</p>
-      `
-    });
-
-    res.json({ success: true });
+    const { id } = req.params;
+    const { date, time, level } = req.body;
+    const b = await Booking.findOne({ _id: id, user: req.user.uid });
+    if (!b) return res.status(404).json({ success:false, message:'Not found' });
+    if (date) b.dateStr = date;
+    if (time) b.timeStr = time;
+    if (level) b.level = level;
+    b.status = 'Scheduled';
+    await b.save();
+    res.json({ success:true, booking: b });
   } catch (e) {
     console.error('Reschedule error:', e);
-    res.status(500).json({ success: false, message: 'Reschedule failed' });
+    res.status(500).json({ success:false, message:'Reschedule failed' });
   }
-}
+});
 
-// маршруты
-app.post('/api/bookings/:id/cancel', auth, cancelHandler);
-app.post('/api/bookings/:id/reschedule', auth, rescheduleHandler);
-
-// алиасы на старые пути (на случай если фронт дергает их)
-app.post('/api/book/:id/cancel', auth, cancelHandler);
-app.post('/api/book/:id/reschedule', auth, rescheduleHandler);
-
-/* -------------------------- Start ---------------------------- */
+/* ---------------- Start ---------------- */
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Server is running on port ${PORT}`));
+const HOST = process.env.HOST || '0.0.0.0';
+app.listen(PORT, HOST, () => console.log(`Server is running on port ${PORT}`));
