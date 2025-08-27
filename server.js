@@ -1,4 +1,4 @@
-// server.js  (patched: memoryStorage + multi-audio support)
+// server.js  (patched: memoryStorage + multi-audio support + WebM->MP3 email attachments)
 const express = require('express');
 const multer = require('multer');
 const cors = require('cors');
@@ -8,6 +8,61 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 require('dotenv').config();
+
+// === FFmpeg for audio conversion (WebM -> MP3) ===
+const ffmpegPath = require('ffmpeg-static');
+const ffmpeg = require('fluent-ffmpeg');
+const { Readable, PassThrough } = require('stream');
+ffmpeg.setFfmpegPath(ffmpegPath);
+
+function bufferToStream(buffer) {
+  const s = new Readable();
+  s.push(buffer);
+  s.push(null);
+  return s;
+}
+async function webmToMp3(buffer) {
+  return new Promise((resolve, reject) => {
+    const input = bufferToStream(buffer);
+    const output = new PassThrough();
+    const chunks = [];
+    output.on('data', (c) => chunks.push(c));
+    output.on('end', () => resolve(Buffer.concat(chunks)));
+    output.on('error', reject);
+
+    ffmpeg(input)
+      .inputFormat('webm')  // исходник от MediaRecorder
+      .noVideo()
+      .audioCodec('libmp3lame')
+      .format('mp3')
+      .on('error', reject)
+      .pipe(output, { end: true });
+  });
+}
+async function normalizeToMp3(file, fallbackName) {
+  if (!file) return null;
+  const looksLikeWebm =
+    (file.mimetype || '').includes('webm') ||
+    (file.originalname || '').toLowerCase().endsWith('.webm');
+
+  if (looksLikeWebm) {
+    const mp3buf = await webmToMp3(file.buffer);
+    const base = (file.originalname || fallbackName || 'recording')
+      .replace(/\.webm$/i, '')
+      .replace(/\.[a-z0-9]+$/i, '');
+    return {
+      filename: `${base}.mp3`,
+      content: mp3buf,
+      contentType: 'audio/mpeg'
+    };
+  }
+  // если уже mp3/m4a/ogg и т.п. — отдаём как есть
+  return {
+    filename: file.originalname || (fallbackName || 'recording'),
+    content: file.buffer,
+    contentType: file.mimetype || 'application/octet-stream'
+  };
+}
 
 const app = express();
 app.use(cors({ origin: '*', credentials: true }));
@@ -83,24 +138,25 @@ function auth(req, res, next) {
 app.get('/health', (req, res) => res.json({ ok: true }));
 
 /* ---------------- Teachers form (audio) ---------------- */
-// ✅ Переход на память: никаких каталогов на диске не требуется
+// ✅ Память вместо диска: не нужен каталог uploads
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 25 * 1024 * 1024 } // до 25 МБ на файл
 });
 
-// Принимаем любые поля, но нам интересны audio / audioQ1 / audioQ2
+// Принимаем любые поля, но интересны audio / audioQ1 / audioQ2
 app.post('/submit', upload.any(), async (req, res) => {
   try {
-    // Поддержка разных названий
+    // Собираем файлы в словарь по имени поля
     const files = {};
-    for (const f of (req.files || [])) {
-      files[f.fieldname] = f;
-    }
-    const audio =
-      files['audio'] || files['audioQ2'] || files['audioQ1'] || null;
+    for (const f of (req.files || [])) files[f.fieldname] = f;
 
-    if (!audio) {
+    // Достаём нужные поля (поддерживаем старые и новые имена)
+    const fQ1 = files['audioQ1'] || null;
+    const fQ2 = files['audioQ2'] || null;
+    const fMain = files['audio'] || null;
+
+    if (!fQ1 && !fQ2 && !fMain) {
       return res.status(400).json({ success: false, message: 'Missing audio file (audio, audioQ1 or audioQ2)' });
     }
 
@@ -111,20 +167,16 @@ app.post('/submit', upload.any(), async (req, res) => {
 
     const parsedLanguages = languages ? String(languages).split(',').map(l=>l.trim()) : [];
 
-    // Формируем вложения: если пришли оба — отправим оба
-    const attachments = [];
-    const mk = (f, fallbackName) => f && ({
-      filename: f.originalname || fallbackName,
-      content: f.buffer,
-      contentType: f.mimetype || 'audio/webm'
-    });
-    const a1 = mk(files['audioQ1'], 'speaking-q1.webm');
-    const a2 = mk(files['audioQ2'], 'speaking-q2.webm');
-    const aMain = mk(files['audio'], 'speaking-assessment.webm');
+    // === Конвертация в MP3 (если WebM) ===
+    const a1 = await normalizeToMp3(fQ1, 'speaking-q1.webm');
+    const a2 = await normalizeToMp3(fQ2, 'speaking-q2.webm');
+    const aMain = await normalizeToMp3(fMain, 'speaking-assessment.webm');
 
+    // Формируем вложения: если пришли оба — отправляем оба; иначе основной
+    const attachments = [];
     if (a1) attachments.push(a1);
     if (a2) attachments.push(a2);
-    if (!a1 && !a2 && aMain) attachments.push(aMain); // если только одно поле
+    if (!a1 && !a2 && aMain) attachments.push(aMain);
 
     await sendEmail({
       to: ADMIN_TO,
@@ -181,7 +233,7 @@ app.post('/api/login', async (req, res) => {
     const { email, password } = req.body;
     const user = await User.findOne({ email:(email||'').toLowerCase() });
     if (!user) return res.status(401).json({ success:false, message:'Invalid credentials' });
-  const ok = await bcrypt.compare(password, user.passwordHash);
+    const ok = await bcrypt.compare(password, user.passwordHash);
     if (!ok) return res.status(401).json({ success:false, message:'Invalid credentials' });
 
     const token = signToken(user);
