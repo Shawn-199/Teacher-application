@@ -1,9 +1,8 @@
-// server.js  (robust CORS + optionalAuth + resilient /api/bookings/trial)
+// server.js  — CORS preflight fixed + optionalAuth + resilient /api/bookings/trial
 const express = require('express');
 const multer = require('multer');
 const cors = require('cors');
 const nodemailer = require('nodemailer');
-const path = require('path');
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
@@ -29,7 +28,6 @@ async function webmToMp3(buffer) {
     output.on('data', (c) => chunks.push(c));
     output.on('end', () => resolve(Buffer.concat(chunks)));
     output.on('error', reject);
-
     ffmpeg(input)
       .inputFormat('webm')
       .noVideo()
@@ -50,11 +48,7 @@ async function normalizeToMp3(file, fallbackName) {
     const base = (file.originalname || fallbackName || 'recording')
       .replace(/\.webm$/i, '')
       .replace(/\.[a-z0-9]+$/i, '');
-    return {
-      filename: `${base}.mp3`,
-      content: mp3buf,
-      contentType: 'audio/mpeg'
-    };
+    return { filename: `${base}.mp3`, content: mp3buf, contentType: 'audio/mpeg' };
   }
   return {
     filename: file.originalname || (fallbackName || 'recording'),
@@ -64,23 +58,26 @@ async function normalizeToMp3(file, fallbackName) {
 }
 
 const app = express();
+app.set('trust proxy', 1);
 
-// --- CORS: отражаем Origin (корректно с credentials) ---
-app.use(cors({
-  origin: (origin, cb) => cb(null, true), // доверяем всем источникам
+// --- CORS (включая preflight) ---
+const corsOptions = {
+  origin: (origin, cb) => cb(null, true),
   credentials: true,
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'x-user-email'],
-  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS']
-}));
+  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS','HEAD'],
+  optionsSuccessStatus: 204,
+  preflightContinue: false
+};
+app.use(cors(corsOptions));
+// ВАЖНО: явно отвечаем на все OPTIONS (preflight)
+app.options('*', cors(corsOptions));
 
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
 
 /* ---------------- MongoDB ---------------- */
-if (!process.env.MONGO_URI) {
-  console.error('Missing MONGO_URI in .env');
-  process.exit(1);
-}
+if (!process.env.MONGO_URI) { console.error('Missing MONGO_URI in .env'); process.exit(1); }
 mongoose
   .connect(process.env.MONGO_URI, { dbName: 'grandenglish' })
   .then(() => console.log('MongoDB connected'))
@@ -106,10 +103,10 @@ const BookingSchema = new Schema({
   childAge: { type: Number },
   country: { type: String },
   timeZone: { type: String },
-  dateStr: { type: String, required: true },   // свободный текст ок
+  dateStr: { type: String, required: true },
   timeStr: { type: String, required: true },
   level:   { type: String, required: true },
-  status:  { type: String, default: 'Scheduled' }, // Scheduled | Confirmed | Completed | Cancelled
+  status:  { type: String, default: 'Scheduled' },
   teacherName: { type: String, default: process.env.TEACHER_NAME || 'Teacher' }
 }, { timestamps: true });
 const Booking = model('Booking', BookingSchema);
@@ -120,11 +117,9 @@ const transporter = nodemailer.createTransport({
   auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS }
 });
 const ADMIN_TO = process.env.ADMIN_BOOKINGS_TO || process.env.NOTIFY_TO || process.env.EMAIL_USER;
-
 async function sendEmail(opts) {
-  try {
-    await transporter.sendMail({ from: `"Grand English Courses" <${process.env.EMAIL_USER}>`, ...opts });
-  } catch (e) { console.error('Email error:', e.message); }
+  try { await transporter.sendMail({ from: `"Grand English Courses" <${process.env.EMAIL_USER}>`, ...opts }); }
+  catch (e) { console.error('Email error:', e.message); }
 }
 
 /* ---------------- JWT ---------------- */
@@ -143,15 +138,12 @@ function auth(req, res, next) {
     return res.status(401).json({ success:false, message:'Invalid auth token' });
   }
 }
-// Опциональная аутентификация — НЕ падает, если токена нет/битый
+// опциональная аутентификация — не падает, если токена нет/битый
 function optionalAuth(req, res, next) {
   try {
     const h = req.headers.authorization || '';
-    if (h.startsWith('Bearer ')) {
-      const payload = jwt.verify(h.slice(7), process.env.JWT_SECRET);
-      req.user = payload;
-    }
-  } catch { /* ignore */ }
+    if (h.startsWith('Bearer ')) req.user = jwt.verify(h.slice(7), process.env.JWT_SECRET);
+  } catch {}
   next();
 }
 
@@ -163,7 +155,6 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 25 * 1024 * 1024 }
 });
-
 app.post('/submit', upload.any(), async (req, res) => {
   try {
     const files = {};
@@ -245,12 +236,12 @@ app.post('/api/register', async (req, res) => {
 
 app.post('/api/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password } = req.body || {};
+    if(!email || !password) return res.status(400).json({ success:false, message:'email and password required' });
     const user = await User.findOne({ email:(email||'').toLowerCase() });
     if (!user) return res.status(401).json({ success:false, message:'Invalid credentials' });
-  const ok = await bcrypt.compare(password, user.passwordHash);
+    const ok = await bcrypt.compare(password, user.passwordHash);
     if (!ok) return res.status(401).json({ success:false, message:'Invalid credentials' });
-
     const token = signToken(user);
     res.json({ success:true, token, user:{ id:user._id, email:user.email, firstName:user.firstName, lastName:user.lastName } });
   } catch (e) {
@@ -271,37 +262,24 @@ app.get('/api/me', optionalAuth, async (req, res) => {
 app.post('/api/bookings/trial', optionalAuth, async (req, res) => {
   try {
     const { date, time, level } = req.body || {};
-    if (!date || !time) {
-      return res.status(400).json({ success:false, message:'date and time are required' });
-    }
+    if (!date || !time) return res.status(400).json({ success:false, message:'date and time are required' });
 
     let userDoc = null;
-
     if (req.user && req.user.uid) {
-      // Авторизованный пользователь
       userDoc = await User.findById(req.user.uid);
       if (!userDoc) return res.status(401).json({ success:false, message:'Auth user not found' });
     } else {
-      // Гость — пробуем достать e-mail из разных мест
-      const emailCandidates = [
+      // гость — достаём email из разных полей/заголовков
+      const candidates = [
         req.body.email, req.body.userEmail, req.body.contactEmail,
-        req.body.login, req.body.username,
-        req.headers['x-user-email']
+        req.body.login, req.body.username, req.headers['x-user-email']
       ].map(v => (v || '').toString().trim()).filter(Boolean);
-
-      let email = (emailCandidates[0] || '').toLowerCase();
-
-      if (!email) {
-        // Если совсем нет e-mail — создаём гостя с синтетическим адресом,
-        // чтобы вернуть успех (лучше для UX, чем "booking failed").
-        email = `guest+${Date.now()}@guest.local`;
-      }
-
-      userDoc = await User.findOne({ email });
-      if (!userDoc) {
-        const passwordHash = await bcrypt.hash(Math.random().toString(36).slice(2), 10);
-        userDoc = await User.create({ email, passwordHash, role: 'student', isGuest: true });
-      }
+      let email = (candidates[0] || '').toLowerCase();
+      if (!email) email = `guest+${Date.now()}@guest.local`;
+      userDoc = await User.findOne({ email }) || await User.create({
+        email, passwordHash: await bcrypt.hash(Math.random().toString(36).slice(2), 10),
+        role: 'student', isGuest: true
+      });
     }
 
     const booking = await Booking.create({
@@ -326,7 +304,6 @@ app.post('/api/bookings/trial', optionalAuth, async (req, res) => {
   }
 });
 
-// Обычное бронирование
 app.post('/api/book', auth, async (req, res) => {
   try {
     const { email, childName, parentName, childAge, country, timeZone, date, time, level } = req.body;
