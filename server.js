@@ -1,4 +1,4 @@
-// server.js  (patched: memoryStorage + multi-audio support + WebM->MP3 email attachments)
+// server.js  (robust CORS + optionalAuth + resilient /api/bookings/trial)
 const express = require('express');
 const multer = require('multer');
 const cors = require('cors');
@@ -31,7 +31,7 @@ async function webmToMp3(buffer) {
     output.on('error', reject);
 
     ffmpeg(input)
-      .inputFormat('webm')  // исходник от MediaRecorder
+      .inputFormat('webm')
       .noVideo()
       .audioCodec('libmp3lame')
       .format('mp3')
@@ -56,7 +56,6 @@ async function normalizeToMp3(file, fallbackName) {
       contentType: 'audio/mpeg'
     };
   }
-  // если уже mp3/m4a/ogg и т.п. — отдаём как есть
   return {
     filename: file.originalname || (fallbackName || 'recording'),
     content: file.buffer,
@@ -65,7 +64,15 @@ async function normalizeToMp3(file, fallbackName) {
 }
 
 const app = express();
-app.use(cors({ origin: '*', credentials: true }));
+
+// --- CORS: отражаем Origin (корректно с credentials) ---
+app.use(cors({
+  origin: (origin, cb) => cb(null, true), // доверяем всем источникам
+  credentials: true,
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'x-user-email'],
+  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS']
+}));
+
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
 
@@ -86,7 +93,8 @@ const UserSchema = new Schema({
   passwordHash: { type: String, required: true },
   firstName: String,
   lastName: String,
-  role: { type: String, default: 'student' }
+  role: { type: String, default: 'student' },
+  isGuest: { type: Boolean, default: false }
 }, { timestamps: true });
 const User = model('User', UserSchema);
 
@@ -98,8 +106,8 @@ const BookingSchema = new Schema({
   childAge: { type: Number },
   country: { type: String },
   timeZone: { type: String },
-  dateStr: { type: String, required: true },   // 'YYYY-MM-DD'
-  timeStr: { type: String, required: true },   // 'HH:MM' or 'HH:MM - HH:MM'
+  dateStr: { type: String, required: true },   // свободный текст ок
+  timeStr: { type: String, required: true },
   level:   { type: String, required: true },
   status:  { type: String, default: 'Scheduled' }, // Scheduled | Confirmed | Completed | Cancelled
   teacherName: { type: String, default: process.env.TEACHER_NAME || 'Teacher' }
@@ -131,27 +139,36 @@ function auth(req, res, next) {
     const payload = jwt.verify(theToken, process.env.JWT_SECRET);
     req.user = payload;
     next();
-  } catch { return res.status(401).json({ success:false, message:'Invalid auth token' }); }
+  } catch {
+    return res.status(401).json({ success:false, message:'Invalid auth token' });
+  }
+}
+// Опциональная аутентификация — НЕ падает, если токена нет/битый
+function optionalAuth(req, res, next) {
+  try {
+    const h = req.headers.authorization || '';
+    if (h.startsWith('Bearer ')) {
+      const payload = jwt.verify(h.slice(7), process.env.JWT_SECRET);
+      req.user = payload;
+    }
+  } catch { /* ignore */ }
+  next();
 }
 
 /* ---------------- Health ---------------- */
 app.get('/health', (req, res) => res.json({ ok: true }));
 
 /* ---------------- Teachers form (audio) ---------------- */
-// ✅ Память вместо диска: не нужен каталог uploads
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 25 * 1024 * 1024 } // до 25 МБ на файл
+  limits: { fileSize: 25 * 1024 * 1024 }
 });
 
-// Принимаем любые поля, но интересны audio / audioQ1 / audioQ2
 app.post('/submit', upload.any(), async (req, res) => {
   try {
-    // Собираем файлы в словарь по имени поля
     const files = {};
     for (const f of (req.files || [])) files[f.fieldname] = f;
 
-    // Достаём нужные поля (поддерживаем старые и новые имена)
     const fQ1 = files['audioQ1'] || null;
     const fQ2 = files['audioQ2'] || null;
     const fMain = files['audio'] || null;
@@ -167,12 +184,10 @@ app.post('/submit', upload.any(), async (req, res) => {
 
     const parsedLanguages = languages ? String(languages).split(',').map(l=>l.trim()) : [];
 
-    // === Конвертация в MP3 (если WebM) ===
     const a1 = await normalizeToMp3(fQ1, 'speaking-q1.webm');
     const a2 = await normalizeToMp3(fQ2, 'speaking-q2.webm');
     const aMain = await normalizeToMp3(fMain, 'speaking-assessment.webm');
 
-    // Формируем вложения: если пришли оба — отправляем оба; иначе основной
     const attachments = [];
     if (a1) attachments.push(a1);
     if (a2) attachments.push(a2);
@@ -233,7 +248,7 @@ app.post('/api/login', async (req, res) => {
     const { email, password } = req.body;
     const user = await User.findOne({ email:(email||'').toLowerCase() });
     if (!user) return res.status(401).json({ success:false, message:'Invalid credentials' });
-    const ok = await bcrypt.compare(password, user.passwordHash);
+  const ok = await bcrypt.compare(password, user.passwordHash);
     if (!ok) return res.status(401).json({ success:false, message:'Invalid credentials' });
 
     const token = signToken(user);
@@ -244,12 +259,74 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-app.get('/api/me', auth, async (req, res) => {
+app.get('/api/me', optionalAuth, async (req, res) => {
+  if (!req.user) return res.json({ success:true, user:null });
   const user = await User.findById(req.user.uid).select('_id email firstName lastName role');
   res.json({ success:true, user });
 });
 
-/* ---------------- Bookings (no schedule dependency) ---------------- */
+/* ---------------- Bookings ---------------- */
+
+// TRIAL booking — работает и с JWT, и без (гость)
+app.post('/api/bookings/trial', optionalAuth, async (req, res) => {
+  try {
+    const { date, time, level } = req.body || {};
+    if (!date || !time) {
+      return res.status(400).json({ success:false, message:'date and time are required' });
+    }
+
+    let userDoc = null;
+
+    if (req.user && req.user.uid) {
+      // Авторизованный пользователь
+      userDoc = await User.findById(req.user.uid);
+      if (!userDoc) return res.status(401).json({ success:false, message:'Auth user not found' });
+    } else {
+      // Гость — пробуем достать e-mail из разных мест
+      const emailCandidates = [
+        req.body.email, req.body.userEmail, req.body.contactEmail,
+        req.body.login, req.body.username,
+        req.headers['x-user-email']
+      ].map(v => (v || '').toString().trim()).filter(Boolean);
+
+      let email = (emailCandidates[0] || '').toLowerCase();
+
+      if (!email) {
+        // Если совсем нет e-mail — создаём гостя с синтетическим адресом,
+        // чтобы вернуть успех (лучше для UX, чем "booking failed").
+        email = `guest+${Date.now()}@guest.local`;
+      }
+
+      userDoc = await User.findOne({ email });
+      if (!userDoc) {
+        const passwordHash = await bcrypt.hash(Math.random().toString(36).slice(2), 10);
+        userDoc = await User.create({ email, passwordHash, role: 'student', isGuest: true });
+      }
+    }
+
+    const booking = await Booking.create({
+      user: userDoc._id,
+      email: userDoc.email,
+      childName: 'Trial Student',
+      parentName: (userDoc.firstName || 'Parent') + (userDoc.lastName ? ' ' + userDoc.lastName : ''),
+      childAge: null,
+      country: '',
+      timeZone: '',
+      dateStr: date,
+      timeStr: time,
+      level: level || 'Beginner',
+      status: 'Scheduled',
+      teacherName: process.env.TEACHER_NAME || 'Teacher'
+    });
+
+    res.json({ success:true, booking });
+  } catch (e) {
+    console.error('Trial booking error:', e);
+    res.status(500).json({ success:false, message:'Booking failed' });
+  }
+});
+
+// Обычное бронирование
 app.post('/api/book', auth, async (req, res) => {
   try {
     const { email, childName, parentName, childAge, country, timeZone, date, time, level } = req.body;
@@ -265,7 +342,6 @@ app.post('/api/book', auth, async (req, res) => {
       teacherName: process.env.TEACHER_NAME || 'Teacher'
     });
 
-    // Notify admin
     await sendEmail({
       to: ADMIN_TO,
       subject: `🗓️ New trial booking: ${childName} (${date} ${time})`,
