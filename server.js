@@ -548,35 +548,6 @@ app.get('/api/admin/stats', requireAdmin, async (_req, res) => {
   });
 });
 
-/* ---------------- ONE-TIME: set password for an existing user ----------------
-   Важно: добавь в Render → Environment переменную ONE_TIME_SETUP_TOKEN со значением
-   длинной случайной строки. После использования — УДАЛИ маршрут и переменную.
-------------------------------------------------------------------------------- */
-app.post('/set-password-once', async (req, res) => {
-  try {
-    const { email, password, token } = req.body || {};
-    if (!process.env.ONE_TIME_SETUP_TOKEN) {
-      return res.status(500).json({ success:false, message:'ONE_TIME_SETUP_TOKEN is not set' });
-    }
-    if (token !== process.env.ONE_TIME_SETUP_TOKEN) {
-      return res.status(403).json({ success:false, message:'Bad token' });
-    }
-    if (!email || !password) {
-      return res.status(400).json({ success:false, message:'email and password are required' });
-    }
-    const user = await User.findOne({ email: (email||'').toLowerCase() });
-    if (!user) return res.status(404).json({ success:false, message:'User not found' });
-
-    user.passwordHash = await bcrypt.hash(password, 10);
-    await user.save();
-
-    return res.json({ success:true, user:{ id:user._id, email:user.email, role:user.role } });
-  } catch(e) {
-    console.error('set-password-once error', e);
-    res.status(500).json({ success:false, message:'Internal error' });
-  }
-});
-
 /* ---------------- Start ---------------- */
 const PORT = process.env.PORT || 5000;
 const HOST = process.env.HOST || '0.0.0.0';
