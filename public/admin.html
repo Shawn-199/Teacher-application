@@ -30,6 +30,7 @@
   .small{font-size:12px;color:var(--muted)}
   .right{margin-left:auto}
 </style>
+<style>.wrap{display:none}</style>
 </head>
 <body>
 <header>
@@ -40,6 +41,17 @@
     <button id="btnPing" class="ghost">Ping</button>
   </div>
 <span class="small" id="pingInfo" style="margin-left:12px"></span></header>
+
+<div id="loginGate" style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);z-index:9999;">
+  <div id="loginPanel" style="background:#fff;padding:24px;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,0.2);width:340px;display:flex;flex-direction:column;gap:12px;">
+    <div style="font-weight:600;font-size:18px;text-align:center;">Admin Login</div>
+    <input id="gateEmail" placeholder="email" style="padding:10px;border:1px solid #ddd;border-radius:10px"/>
+    <input id="gatePass" type="password" placeholder="password" style="padding:10px;border:1px solid #ddd;border-radius:10px"/>
+    <button id="gateLogin" style="padding:10px;border-radius:10px;border:none;box-shadow:0 2px 6px rgba(0,0,0,0.1);cursor:pointer;">Login</button>
+    <div id="gateInfo" class="small" style="min-height:18px;color:#666;text-align:center;"></div>
+  </div>
+</div>
+
 
 <div class="wrap">
   <section class="card">
@@ -98,16 +110,13 @@
   </section>
 </div>
 
-<script defer>
+<script>
 const $ = (id)=>document.getElementById(id);
 const fmt = (d)=> new Date(d).toLocaleString();
 
 function getBase(){
-  const el = document.getElementById('apiBase');
-  const v = el ? el.value.trim().replace(/\/$/,'') : '';
-  return v || window.location.origin;
-}
-function getToken(){
+  return window.location.origin;
+}function getToken(){
   const manual = $('adminJwt').value.trim();
   if (manual) return manual;
   return localStorage.getItem('GE_ADMIN_TOKEN') || '';
@@ -235,14 +244,14 @@ $('btnBookings').onclick = async ()=>{
     tb.querySelectorAll('.btnSave').forEach(btn=>{
       btn.onclick = async ()=>{
         const id = btn.dataset.id;
-        const st = tb.querySelector(`.stSel[data-id="\${id}"]`).value;
-        const dt = tb.querySelector(`.dt[data-id="\${id}"]`).value;
-        const tm = tb.querySelector(`.tm[data-id="\${id}"]`).value;
+        const st = tb.querySelector(\`.stSel[data-id="\${id}"]\`).value;
+        const dt = tb.querySelector(\`.dt[data-id="\${id}"]\`).value;
+        const tm = tb.querySelector(\`.tm[data-id="\${id}"]\`).value;
         const body = { status: st };
         if(dt) body.dateStr = dt;
         if(tm) body.timeStr = tm;
         try{
-          await api(`/api/admin/bookings/\${id}/status`, {
+          await api(\`/api/admin/bookings/\${id}/status\`, {
             method:'PATCH', body: JSON.stringify(body)
           });
           btn.textContent='Saved'; setTimeout(()=>btn.textContent='Save', 1200);
@@ -264,21 +273,51 @@ $('btnPing').onclick = async ()=>{
   }
 };
 
-document.addEventListener('DOMContentLoaded', ()=>{
-  const info = document.getElementById('pingInfo') || document.getElementById('loginInfo');
-  const btn = document.getElementById('btnPing');
-  if (btn) {
-    btn.addEventListener('click', async ()=>{
-      try{
-        const r = await fetch(getBase() + '/health', { headers: {} });
-        const j = await r.json();
-        if (info) info.textContent = 'Ping OK';
-        else alert('OK: ' + JSON.stringify(j));
-      }catch(e){
-        if (info) info.textContent = 'Ping error: ' + e.message;
-        alert('Ping error: ' + e.message);
+document.addEventListener('DOMContentLoaded', async ()=>{
+  const $ = (id)=>document.getElementById(id);
+  // Hide API base & Ping elements if present
+  const pingBtn = $('btnPing'); if (pingBtn) pingBtn.style.display = 'none';
+  const apiBase = $('apiBase'); if (apiBase) apiBase.closest('div').style.display = 'none';
+
+  async function ensureAuthFromToken(){
+    try{
+      const me = await api('/api/me');
+      if (me && me.success && me.user){
+        const li = $('loginInfo'); if (li) li.textContent = 'Logged in as ' + (me.user.email||'');
+        const wrap = document.querySelector('.wrap'); if (wrap) wrap.style.display = '';
+        const gate = $('loginGate'); if (gate) gate.style.display = 'none';
+        return true;
       }
-    });
+    }catch(e){ /* ignore */ }
+    return false;
+  }
+
+  if (!(await ensureAuthFromToken())){
+    // Attach login handler for gate
+    const btn = $('gateLogin');
+    if (btn){
+      btn.addEventListener('click', async ()=>{
+        const email = ($('gateEmail')?.value||'').trim();
+        const password = ($('gatePass')?.value||'').trim();
+        const info = $('gateInfo');
+        if (!email || !password){
+          if (info) info.textContent = 'Enter email and password';
+          return;
+        }
+        try{
+          const res = await api('/api/login', { method:'POST', body: JSON.stringify({ email, password }) });
+          if (res && res.success && res.token){
+            setToken && setToken(res.token);
+            if (info) info.textContent = 'Logged in';
+            await ensureAuthFromToken();
+          }else{
+            if (info) info.textContent = (res && res.message) ? res.message : 'Login failed';
+          }
+        }catch(e){
+          if (info) info.textContent = e.message || 'Login error';
+        }
+      });
+    }
   }
 });
 
