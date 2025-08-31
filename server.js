@@ -1,4 +1,4 @@
-// server.js — Admin API + безопасный CORS preflight без app.options()
+// server.js — Admin API + безопасный CORS preflight + статика admin-ui + ONE-TIME /set-password-once
 const express = require('express');
 const multer = require('multer');
 const cors = require('cors');
@@ -74,9 +74,14 @@ app.use(cors(corsOptions));
 // Универсальный handler для preflight (без шаблонов path-to-regexp)
 app.use((req, res, next) => {
   if (req.method === 'OPTIONS') {
-    res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
-    res.header('Vary', 'Origin');
-    res.header('Access-Control-Allow-Credentials', 'true');
+    const origin = req.headers.origin;
+    if (origin) {
+      res.header('Access-Control-Allow-Origin', origin);
+      res.header('Vary', 'Origin');
+      res.header('Access-Control-Allow-Credentials', 'true');
+    } else {
+      res.header('Access-Control-Allow-Origin', '*');
+    }
     res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, x-user-email');
     res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS,HEAD');
     return res.sendStatus(204);
@@ -87,7 +92,7 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// раздача админки как статики
+// Раздача админки как статики (public/admin.html -> /admin-ui/admin.html)
 app.use('/admin-ui', express.static('public', { extensions: ['html'], index: false }));
 
 /* ---------------- MongoDB ---------------- */
@@ -302,6 +307,7 @@ app.post('/api/bookings/trial', optionalAuth, async (req, res) => {
       userDoc = await User.findById(req.user.uid);
       if (!userDoc) return res.status(401).json({ success:false, message:'Auth user not found' });
     } else {
+      // гость — достаём email из разных полей/заголовков
       const candidates = [
         req.body.email, req.body.userEmail, req.body.contactEmail,
         req.body.login, req.body.username, req.headers['x-user-email']
@@ -447,7 +453,11 @@ app.get('/api/admin/users', requireAdmin, async (req, res) => {
     User.countDocuments(cond)
   ]);
 
-  res.json({ success: true, page: pg, limit: per, total, users: items });
+  res.json({
+    success: true,
+    page: pg, limit: per, total,
+    users: items
+  });
 });
 
 // GET /api/admin/bookings — список бронирований с фильтрами
@@ -471,11 +481,17 @@ app.get('/api/admin/bookings', requireAdmin, async (req, res) => {
   const pg = Math.max(Number(page)||1, 1);
 
   const [items, total] = await Promise.all([
-    Booking.find(cond).sort({ createdAt: -1 }).skip((pg-1)*per).limit(per).lean(),
+    Booking.find(cond).sort({ createdAt: -1 })
+      .skip((pg-1)*per).limit(per)
+      .lean(),
     Booking.countDocuments(cond)
   ]);
 
-  res.json({ success: true, page: pg, limit: per, total, bookings: items });
+  res.json({
+    success: true,
+    page: pg, limit: per, total,
+    bookings: items
+  });
 });
 
 // PATCH /api/admin/bookings/:id/status — смена статуса/даты/времени/уровня/преподавателя
@@ -499,6 +515,7 @@ app.patch('/api/admin/bookings/:id/status', requireAdmin, async (req, res) => {
 
   await b.save();
 
+  // (опционально) письмо родителю/студенту
   if (notifyEmail && b.email) {
     const statusText = b.status;
     const html = `
@@ -529,6 +546,35 @@ app.get('/api/admin/stats', requireAdmin, async (_req, res) => {
     usersTotal, bookingsTotal,
     byStatus: { Scheduled: scheduled, Completed: completed, Cancelled: cancelled, 'No-Show': noshow }
   });
+});
+
+/* ---------------- ONE-TIME: set password for an existing user ----------------
+   Важно: добавь в Render → Environment переменную ONE_TIME_SETUP_TOKEN со значением
+   длинной случайной строки. После использования — УДАЛИ маршрут и переменную.
+------------------------------------------------------------------------------- */
+app.post('/set-password-once', async (req, res) => {
+  try {
+    const { email, password, token } = req.body || {};
+    if (!process.env.ONE_TIME_SETUP_TOKEN) {
+      return res.status(500).json({ success:false, message:'ONE_TIME_SETUP_TOKEN is not set' });
+    }
+    if (token !== process.env.ONE_TIME_SETUP_TOKEN) {
+      return res.status(403).json({ success:false, message:'Bad token' });
+    }
+    if (!email || !password) {
+      return res.status(400).json({ success:false, message:'email and password are required' });
+    }
+    const user = await User.findOne({ email: (email||'').toLowerCase() });
+    if (!user) return res.status(404).json({ success:false, message:'User not found' });
+
+    user.passwordHash = await bcrypt.hash(password, 10);
+    await user.save();
+
+    return res.json({ success:true, user:{ id:user._id, email:user.email, role:user.role } });
+  } catch(e) {
+    console.error('set-password-once error', e);
+    res.status(500).json({ success:false, message:'Internal error' });
+  }
 });
 
 /* ---------------- Start ---------------- */
