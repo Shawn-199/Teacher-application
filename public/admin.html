@@ -235,14 +235,14 @@ $('btnBookings').onclick = async ()=>{
     tb.querySelectorAll('.btnSave').forEach(btn=>{
       btn.onclick = async ()=>{
         const id = btn.dataset.id;
-        const st = tb.querySelector(\`.stSel[data-id="\${id}"]\`).value;
-        const dt = tb.querySelector(\`.dt[data-id="\${id}"]\`).value;
-        const tm = tb.querySelector(\`.tm[data-id="\${id}"]\`).value;
+        const st = tb.querySelector(`.stSel[data-id="\${id}"]`).value;
+        const dt = tb.querySelector(`.dt[data-id="\${id}"]`).value;
+        const tm = tb.querySelector(`.tm[data-id="\${id}"]`).value;
         const body = { status: st };
         if(dt) body.dateStr = dt;
         if(tm) body.timeStr = tm;
         try{
-          await api(\`/api/admin/bookings/\${id}/status\`, {
+          await api(`/api/admin/bookings/\${id}/status`, {
             method:'PATCH', body: JSON.stringify(body)
           });
           btn.textContent='Saved'; setTimeout(()=>btn.textContent='Save', 1200);
