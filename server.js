@@ -1,4 +1,4 @@
-// server.js  — CORS preflight fixed + optionalAuth + resilient /api/bookings/trial + Admin API
+// server.js  — CORS preflight fixed (Express 5 safe) + optionalAuth + /api/admin + one-time /make-me-admin
 const express = require('express');
 const multer = require('multer');
 const cors = require('cors');
@@ -70,8 +70,10 @@ const corsOptions = {
   preflightContinue: false
 };
 app.use(cors(corsOptions));
-// ВАЖНО: явно отвечаем на все OPTIONS (preflight)
-app.options('*', cors(corsOptions));
+// ВАЖНО: для Express 5/path-to-regexp v6 — нельзя '*' как путь.
+// Было: app.options('*', cors(corsOptions));
+// Стало безопасно:
+app.options('/*', cors(corsOptions));
 
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
@@ -497,8 +499,7 @@ app.patch('/api/admin/bookings/:id/status', requireAdmin, async (req, res) => {
 
   await b.save();
 
-  // === (опционально) уведомление родителю/студенту при смене статуса ===
-  // Включается, если в .env выставлен EMAIL_USER/EMAIL_PASS, и если флаг notifyEmail=true
+  // (опционально) письмо родителю/студенту
   if (notifyEmail && b.email) {
     const statusText = b.status;
     const html = `
@@ -508,17 +509,13 @@ app.patch('/api/admin/bookings/:id/status', requireAdmin, async (req, res) => {
       <p><strong>Teacher:</strong> ${b.teacherName || '—'}</p>
       <p>If you have questions, just reply to this email.</p>
     `;
-    sendEmail({
-      to: b.email,
-      subject: `Lesson status updated: ${statusText}`,
-      html
-    }).catch(()=>{});
+    sendEmail({ to: b.email, subject: `Lesson status updated: ${statusText}`, html }).catch(()=>{});
   }
 
   res.json({ success:true, booking: b });
 });
 
-// GET /api/admin/stats — сводка для шапки админки
+// GET /api/admin/stats — сводка
 app.get('/api/admin/stats', requireAdmin, async (_req, res) => {
   const [usersTotal, bookingsTotal, scheduled, completed, cancelled, noshow] = await Promise.all([
     User.countDocuments({}),
