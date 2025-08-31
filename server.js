@@ -87,6 +87,12 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
 
+// раздача админки как статики
+app.use('/admin-ui', express.static('public', {
+  extensions: ['html'], // позволяет заходить без .html, если захочешь
+  index: false
+}));
+
 /* ---------------- MongoDB ---------------- */
 if (!process.env.MONGO_URI) { console.error('Missing MONGO_URI in .env'); process.exit(1); }
 mongoose
