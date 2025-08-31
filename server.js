@@ -1,4 +1,4 @@
-// server.js  — CORS preflight fixed (Express 5 safe) + optionalAuth + /api/admin + one-time /make-me-admin
+// server.js — Express 5 safe CORS preflight, Admin API, one-time /make-me-admin
 const express = require('express');
 const multer = require('multer');
 const cors = require('cors');
@@ -70,10 +70,8 @@ const corsOptions = {
   preflightContinue: false
 };
 app.use(cors(corsOptions));
-// ВАЖНО: для Express 5/path-to-regexp v6 — нельзя '*' как путь.
-// Было: app.options('*', cors(corsOptions));
-// Стало безопасно:
-app.options('/*', cors(corsOptions));
+// ВАЖНО для Express 5/path-to-regexp v6: используем '/(.*)' вместо '*' или '/*'
+app.options('/(.*)', cors(corsOptions));
 
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
