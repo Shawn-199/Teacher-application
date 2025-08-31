@@ -528,17 +528,6 @@ app.get('/api/admin/stats', requireAdmin, async (_req, res) => {
   });
 });
 
-/* ---------------- One-time helper: make yourself admin ---------------- */
-app.get('/make-me-admin', async (req, res) => {
-  try {
-    const email = "shakhrom.azimov99@gmail.com";
-    const r = await User.updateOne({ email }, { $set: { role: "admin" } });
-    res.json({ success: true, updated: r.modifiedCount });
-  } catch (e) {
-    res.status(500).json({ success: false, error: e.message });
-  }
-});
-
 /* ---------------- Start ---------------- */
 const PORT = process.env.PORT || 5000;
 const HOST = process.env.HOST || '0.0.0.0';
