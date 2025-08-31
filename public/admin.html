@@ -39,7 +39,7 @@
     <input id="adminJwt" placeholder="Admin JWT (optional)" style="width:320px"/>
     <button id="btnPing" class="ghost">Ping</button>
   </div>
-</header>
+<span class="small" id="pingInfo" style="margin-left:12px"></span></header>
 
 <div class="wrap">
   <section class="card">
@@ -98,11 +98,15 @@
   </section>
 </div>
 
-<script>
+<script defer>
 const $ = (id)=>document.getElementById(id);
 const fmt = (d)=> new Date(d).toLocaleString();
 
-function getBase(){ return $('apiBase').value.trim().replace(/\/$/,''); }
+function getBase(){
+  const el = document.getElementById('apiBase');
+  const v = el ? el.value.trim().replace(/\/$/,'') : '';
+  return v || window.location.origin;
+}
 function getToken(){
   const manual = $('adminJwt').value.trim();
   if (manual) return manual;
@@ -248,6 +252,36 @@ $('btnBookings').onclick = async ()=>{
 
   }catch(e){ alert('Bookings error: '+e.message); }
 };
+$('btnPing').onclick = async ()=>{
+  const el = document.getElementById('pingInfo') || document.getElementById('loginInfo');
+  try{
+    const j = await api('/health', { headers:{} });
+    if (el) el.textContent = 'Ping OK';
+    else alert('OK: ' + JSON.stringify(j));
+  }catch(e){
+    if (el) el.textContent = 'Ping error: ' + e.message;
+    alert('Ping error: ' + e.message);
+  }
+};
+
+document.addEventListener('DOMContentLoaded', ()=>{
+  const info = document.getElementById('pingInfo') || document.getElementById('loginInfo');
+  const btn = document.getElementById('btnPing');
+  if (btn) {
+    btn.addEventListener('click', async ()=>{
+      try{
+        const r = await fetch(getBase() + '/health', { headers: {} });
+        const j = await r.json();
+        if (info) info.textContent = 'Ping OK';
+        else alert('OK: ' + JSON.stringify(j));
+      }catch(e){
+        if (info) info.textContent = 'Ping error: ' + e.message;
+        alert('Ping error: ' + e.message);
+      }
+    });
+  }
+});
+
 </script>
 </body>
 </html>
