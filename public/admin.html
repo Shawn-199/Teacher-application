@@ -8,7 +8,7 @@
 :root{--bg:#f5f7fb;--card:#fff;--ink:#0f172a;--muted:#6b7280;--primary:#3b82f6;--border:#e5e7eb}
 *{box-sizing:border-box} body{margin:0;background:var(--bg);font-family:system-ui,Segoe UI,Inter,Arial,sans-serif;color:var(--ink)}
 header{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;background:#fff;border-bottom:1px solid var(--border);position:sticky;top:0;z-index:10}
-.wrap{max-width:1200px;margin:16px auto;padding:0 16px;display:grid;gap:16px}
+.wrap{max-width:1200px;margin:16px auto;padding:0 16px;gap:16px}
 .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;box-shadow:0 6px 18px rgba(0,0,0,.04)}
 .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 input,select,button{height:40px;border-radius:10px;border:1px solid var(--border);padding:0 12px;font:inherit}
@@ -32,8 +32,10 @@ th{font-weight:800;color:#334155}
 /* Login gate */
 #loginGate{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);z-index:9999}
 #loginPanel{background:#fff;padding:24px;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,0.2);width:340px;display:flex;flex-direction:column;gap:12px}
-/* hide app until auth */
+
+/* App visibility: hidden until auth */
 .wrap{display:none}
+body.authed .wrap{display:grid}
 </style>
 </head>
 <body>
@@ -119,14 +121,18 @@ async function api(path, opts={}){
   return j;
 }
 
+function showApp(me){
+  document.body.classList.add('authed');
+  const gate = $('loginGate'); if (gate) gate.style.display = 'none';
+  const lo = $('btnLogout'); if (lo) lo.style.display = '';
+  const li = $('loginInfo'); if (li) li.textContent = 'Logged in as ' + (me.user?.email || '');
+}
+
 async function ensureAuthFromToken(){
   try{
     const me = await api('/api/me');
     if (me && me.success && me.user){
-      const wrap = document.querySelector('.wrap'); if (wrap) wrap.style.display = '';
-      const gate = $('loginGate'); if (gate) gate.style.display = 'none';
-      const lo = $('btnLogout'); if (lo) lo.style.display = '';
-      const li = $('loginInfo'); if (li) li.textContent = 'Logged in as ' + (me.user.email||'');
+      showApp(me);
       return true;
     }
   }catch(e){ /* ignore */ }
@@ -136,7 +142,7 @@ async function ensureAuthFromToken(){
 document.addEventListener('DOMContentLoaded', async ()=>{
   // Logout
   const lg = $('btnLogout');
-  if (lg) lg.addEventListener('click', ()=>{ setToken(''); location.reload(); });
+  if (lg) lg.addEventListener('click', ()=>{ setToken(''); document.body.classList.remove('authed'); location.reload(); });
 
   // Try restore session
   if (!(await ensureAuthFromToken())){
@@ -149,8 +155,8 @@ document.addEventListener('DOMContentLoaded', async ()=>{
         const res = await api('/api/login', { method:'POST', body: JSON.stringify({ email, password }) });
         if(res && res.success && res.token){
           setToken(res.token);
-          if(info) info.textContent='Logged in';
-          await ensureAuthFromToken();
+          const me = await api('/api/me');
+          showApp(me);
         }else{
           if(info) info.textContent = (res && res.message) ? res.message : 'Login failed';
         }
@@ -252,14 +258,14 @@ document.addEventListener('DOMContentLoaded', async ()=>{
       tb.querySelectorAll('.btnSave').forEach(btn=>{
         btn.onclick = async ()=>{
           const id = btn.dataset.id;
-          const st = tb.querySelector(\`.stSel[data-id="\${id}"]\`).value;
-          const nd = tb.querySelector(\`.dt[data-id="\${id}"]\`).value;
-          const nt = tb.querySelector(\`.tm[data-id="\${id}"]\`).value;
+          const st = tb.querySelector(`.stSel[data-id="${id}"]`).value;
+          const nd = tb.querySelector(`.dt[data-id="${id}"]`).value;
+          const nt = tb.querySelector(`.tm[data-id="${id}"]`).value;
           const body = { status: st };
           if(nd) body.dateStr = nd;
           if(nt) body.timeStr = nt;
           try{
-            await api(\`/api/admin/bookings/\${id}/status\`, { method:'PATCH', body: JSON.stringify(body) });
+            await api(`/api/admin/bookings/${id}/status`, { method:'PATCH', body: JSON.stringify(body) });
             btn.textContent='Saved'; setTimeout(()=>btn.textContent='Save', 1200);
           }catch(e){ alert('Save error: '+e.message); }
         };
