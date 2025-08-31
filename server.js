@@ -1,4 +1,4 @@
-// server.js — Express 5 safe CORS preflight, Admin API, one-time /make-me-admin
+// server.js — Admin API + безопасный CORS preflight без app.options()
 const express = require('express');
 const multer = require('multer');
 const cors = require('cors');
@@ -70,8 +70,19 @@ const corsOptions = {
   preflightContinue: false
 };
 app.use(cors(corsOptions));
-// ВАЖНО для Express 5/path-to-regexp v6: используем '/(.*)' вместо '*' или '/*'
-app.options('/(.*)', cors(corsOptions));
+
+// Универсальный handler для preflight (без шаблонов path-to-regexp)
+app.use((req, res, next) => {
+  if (req.method === 'OPTIONS') {
+    res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+    res.header('Vary', 'Origin');
+    res.header('Access-Control-Allow-Credentials', 'true');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, x-user-email');
+    res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS,HEAD');
+    return res.sendStatus(204);
+  }
+  next();
+});
 
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
@@ -138,7 +149,6 @@ function auth(req, res, next) {
     return res.status(401).json({ success:false, message:'Invalid auth token' });
   }
 }
-// опциональная аутентификация — не падает, если токена нет/битый
 function optionalAuth(req, res, next) {
   try {
     const h = req.headers.authorization || '';
@@ -289,7 +299,6 @@ app.post('/api/bookings/trial', optionalAuth, async (req, res) => {
       userDoc = await User.findById(req.user.uid);
       if (!userDoc) return res.status(401).json({ success:false, message:'Auth user not found' });
     } else {
-      // гость — достаём email из разных полей/заголовков
       const candidates = [
         req.body.email, req.body.userEmail, req.body.contactEmail,
         req.body.login, req.body.username, req.headers['x-user-email']
@@ -435,11 +444,7 @@ app.get('/api/admin/users', requireAdmin, async (req, res) => {
     User.countDocuments(cond)
   ]);
 
-  res.json({
-    success: true,
-    page: pg, limit: per, total,
-    users: items
-  });
+  res.json({ success: true, page: pg, limit: per, total, users: items });
 });
 
 // GET /api/admin/bookings — список бронирований с фильтрами
@@ -463,17 +468,11 @@ app.get('/api/admin/bookings', requireAdmin, async (req, res) => {
   const pg = Math.max(Number(page)||1, 1);
 
   const [items, total] = await Promise.all([
-    Booking.find(cond).sort({ createdAt: -1 })
-      .skip((pg-1)*per).limit(per)
-      .lean(),
+    Booking.find(cond).sort({ createdAt: -1 }).skip((pg-1)*per).limit(per).lean(),
     Booking.countDocuments(cond)
   ]);
 
-  res.json({
-    success: true,
-    page: pg, limit: per, total,
-    bookings: items
-  });
+  res.json({ success: true, page: pg, limit: per, total, bookings: items });
 });
 
 // PATCH /api/admin/bookings/:id/status — смена статуса/даты/времени/уровня/преподавателя
@@ -497,7 +496,6 @@ app.patch('/api/admin/bookings/:id/status', requireAdmin, async (req, res) => {
 
   await b.save();
 
-  // (опционально) письмо родителю/студенту
   if (notifyEmail && b.email) {
     const statusText = b.status;
     const html = `
