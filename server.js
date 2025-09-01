@@ -8,6 +8,18 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 require('dotenv').config();
 
+// ---- Startup sanity checks ----
+function bootChecks() {
+  const missing = [];
+  if (!process.env.JWT_SECRET) missing.push('JWT_SECRET');
+  if (!process.env.MONGO_URI && !process.env.MONGODB_URI) missing.push('MONGO_URI or MONGODB_URI');
+  if (missing.length) {
+    console.error('[FATAL] Missing env:', missing.join(', '));
+  }
+}
+bootChecks();
+
+
 // === FFmpeg for audio conversion (WebM -> MP3) ===
 const ffmpegPath = require('ffmpeg-static');
 const ffmpeg = require('fluent-ffmpeg');
@@ -67,7 +79,7 @@ const corsOptions = {
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'x-user-email'],
   methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS','HEAD'],
   optionsSuccessStatus: 204,
-  preflightContinue: false
+  preflightContinue: false, maxAge: 86400
 };
 app.use(cors(corsOptions));
 
@@ -149,18 +161,27 @@ function signToken(user) {
 function auth(req, res, next) {
   try {
     const h = req.headers.authorization || '';
-    const theToken = h.startsWith('Bearer ') ? h.slice(7) : '';
+    if (!h.startsWith('Bearer ')) {
+      return res.status(401).json({ success:false, code:'MISSING_TOKEN', message:'Missing Authorization: Bearer <token>' });
+    }
+    const theToken = h.slice(7).trim();
+    if (!theToken) {
+      return res.status(401).json({ success:false, code:'EMPTY_TOKEN', message:'Empty bearer token' });
+    }
     const payload = jwt.verify(theToken, process.env.JWT_SECRET);
     req.user = payload;
     next();
-  } catch {
-    return res.status(401).json({ success:false, message:'Invalid auth token' });
+  } catch (e) {
+    return res.status(401).json({ success:false, code:'INVALID_TOKEN', message:'Invalid or expired auth token' });
   }
 }
 function optionalAuth(req, res, next) {
   try {
     const h = req.headers.authorization || '';
-    if (h.startsWith('Bearer ')) req.user = jwt.verify(h.slice(7), process.env.JWT_SECRET);
+    if (h.startsWith('Bearer ')) {
+      const t = h.slice(7).trim();
+      if (t) req.user = jwt.verify(t, process.env.JWT_SECRET);
+    }
   } catch {}
   next();
 }
@@ -381,7 +402,7 @@ app.post('/api/book', auth, async (req, res) => {
 app.get('/api/my-bookings', auth, async (req, res) => {
   try {
     const items = await Booking.find({ user: req.user.uid }).sort({ createdAt: -1 }).lean();
-    res.json({ success:true, bookings: items });
+    res.json({ success:true, bookings: items.map(x => ({ ...x, status: (x.status||'').toLowerCase() })) });
   } catch (e) {
     console.error('List bookings error:', e);
     res.status(500).json({ success:false, message:'Failed to list bookings' });
@@ -391,9 +412,10 @@ app.get('/api/my-bookings', auth, async (req, res) => {
 app.post('/api/bookings/:id/cancel', auth, async (req, res) => {
   try {
     const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) return res.status(400).json({ success:false, message:'Invalid booking id' });
     const b = await Booking.findOne({ _id: id, user: req.user.uid });
     if (!b) return res.status(404).json({ success:false, message:'Not found' });
-    b.status = 'Cancelled';
+    b.status = 'cancelled';
     await b.save();
     res.json({ success:true, booking: b });
   } catch (e) {
@@ -552,3 +574,16 @@ app.get('/api/admin/stats', requireAdmin, async (_req, res) => {
 const PORT = process.env.PORT || 5000;
 const HOST = process.env.HOST || '0.0.0.0';
 app.listen(PORT, HOST, () => console.log(`Server is running on port ${PORT}`));
+
+// Latest booking helper
+app.get('/api/my-bookings/latest', auth, async (req, res) => {
+  try {
+    const b = await Booking.findOne({ user: req.user.uid }).sort({ createdAt: -1 }).lean();
+    if (!b) return res.json({ success:true, booking: null });
+    if (b.status) b.status = String(b.status).toLowerCase();
+    res.json({ success:true, booking: b });
+  } catch (e) {
+    console.error('Latest booking error:', e);
+    res.status(500).json({ success:false, message:'Failed to fetch latest booking' });
+  }
+});
