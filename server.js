@@ -243,7 +243,6 @@ app.post('/submit', upload.any(), async (req, res) => {
     const aMain = await normalizeToMp3(fMain, 'speaking-assessment.webm');
 
     const attachments = [];
-    \1
     if (fCV) {
       attachments.push({ filename: fCV.originalname || 'CV', content: fCV.buffer, contentType: fCV.mimetype || 'application/octet-stream' });
     }
