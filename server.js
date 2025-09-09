@@ -222,7 +222,11 @@ app.post('/submit', upload.any(), async (req, res) => {
     const fQ1 = files['audioQ1'] || null;
     const fQ2 = files['audioQ2'] || null;
     const fMain = files['audio'] || null;
+    const fCV = files['cv'] || files['resume'] || files['cvFile'] || null;
 
+    if (!fCV) {
+      return res.status(400).json({ success: false, message: 'Missing required file: CV' });
+    }
     if (!fQ1 && !fQ2 && !fMain) {
       return res.status(400).json({ success: false, message: 'Missing audio file (audio, audioQ1 or audioQ2)' });
     }
@@ -239,11 +243,11 @@ app.post('/submit', upload.any(), async (req, res) => {
     const aMain = await normalizeToMp3(fMain, 'speaking-assessment.webm');
 
     const attachments = [];
-    if (a1) attachments.push(a1);
-    if (a2) attachments.push(a2);
-    if (!a1 && !a2 && aMain) attachments.push(aMain);
-
-    await sendEmail({
+    \1
+    if (fCV) {
+      attachments.push({ filename: fCV.originalname || 'CV', content: fCV.buffer, contentType: fCV.mimetype || 'application/octet-stream' });
+    }
+await sendEmail({
       to: ADMIN_TO,
       subject: `🎓 Новая заявка от ${fullname}`,
       html: `
