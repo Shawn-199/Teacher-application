@@ -245,7 +245,12 @@ app.post('/submit', upload.any(), async (req, res) => {
     const attachments = [];
     if (fCV) {
       attachments.push({ filename: fCV.originalname || 'CV', content: fCV.buffer, contentType: fCV.mimetype || 'application/octet-stream' });
-    }
+    
+    // Attach audio recordings if present
+    if (a1) attachments.push(a1);
+    if (a2) attachments.push(a2);
+    if (aMain) attachments.push(aMain);
+}
 await sendEmail({
       to: ADMIN_TO,
       subject: `🎓 Новая заявка от ${fullname}`,
