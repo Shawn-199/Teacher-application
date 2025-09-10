@@ -3,6 +3,7 @@ const express = require('express');
 const multer = require('multer');
 const cors = require('cors');
 const nodemailer = require('nodemailer');
+const crypto = require('crypto');
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
@@ -219,7 +220,9 @@ app.post('/submit', upload.any(), async (req, res) => {
     const files = {};
     for (const f of (req.files || [])) files[f.fieldname] = f;
 
-    const fQ1 = files['audioQ1'] || null;
+    
+    console.log('FILES:', (req.files || []).map(f => ({ field: f.fieldname, name: f.originalname, size: f.size, type: f.mimetype })));
+const fQ1 = files['audioQ1'] || null;
     const fQ2 = files['audioQ2'] || null;
     const fMain = files['audio'] || null;
     const fCV = files['cv'] || files['resume'] || files['cvFile'] || null;
@@ -242,15 +245,39 @@ app.post('/submit', upload.any(), async (req, res) => {
     const a2 = await normalizeToMp3(fQ2, 'speaking-q2.webm');
     const aMain = await normalizeToMp3(fMain, 'speaking-assessment.webm');
 
-    const attachments = [];
-    if (fCV) {
-      attachments.push({ filename: fCV.originalname || 'CV', content: fCV.buffer, contentType: fCV.mimetype || 'application/octet-stream' });
     
-    // Attach audio recordings if present
-    if (a1) attachments.push(a1);
-    if (a2) attachments.push(a2);
-    if (aMain) attachments.push(aMain);
-}
+    // Collect attachments: CV + audio (deduplicated)
+    const attachments = [];
+    function pushUnique(att) {
+      if (!att || !att.content) return;
+      try {
+        const hash = crypto.createHash('sha1').update(att.content).digest('hex');
+        pushUnique._seen = pushUnique._seen || new Set();
+        const aux = `${att.filename || ''}:${att.content.length}`;
+        const key = `${hash}:${aux}`;
+        if (!pushUnique._seen.has(key)) {
+          pushUnique._seen.add(key);
+          attachments.push(att);
+        }
+      } catch (e) {
+        // Fallback: still push if hashing fails
+        attachments.push(att);
+      }
+    }
+
+    // CV
+    if (fCV) {
+      pushUnique({
+        filename: fCV.originalname || 'CV',
+        content:  fCV.buffer,
+        contentType: fCV.mimetype || 'application/octet-stream'
+      });
+    }
+
+    // Audio (only if present & unique)
+    if (a1)    pushUnique(a1);
+    if (a2)    pushUnique(a2);
+    if (aMain) pushUnique(aMain);
 await sendEmail({
       to: ADMIN_TO,
       subject: `🎓 Новая заявка от ${fullname}`,
