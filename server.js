@@ -637,48 +637,6 @@ app.get('/api/admin/stats', requireAdmin, async (_req, res) => {
 });
 
 
-
-// === Admin: list slots (GET) ===
-// Пример: GET /api/admin/slots?from=2025-10-01&to=2025-11-30&kind=recurring&active=true
-app.get('/api/admin/slots', requireAdmin, async (req, res) => {
-  try {
-    const { from, to, kind, active } = req.query;
-    const q = {};
-    if (kind) q.kind = kind;
-    if (active === 'true') q.isActive = true;
-    if (active === 'false') q.isActive = false;
-
-    if (from || to) {
-      const fromDt = from ? new Date(from) : null;
-      const toDt   = to   ? new Date(to)   : null;
-      q.$or = [
-        // oneoff: попадают, если пересекаются с диапазоном
-        {
-          kind: 'oneoff',
-          ...(fromDt ? { endISO:   { $gte: fromDt } } : {}),
-          ...(toDt   ? { startISO: { $lte: toDt   } } : {}),
-        },
-        // recurring: действуют в диапазоне
-        {
-          kind: 'recurring',
-          ...(fromDt ? { $or: [ { validTo: { $exists:false } }, { validTo: { $gte: fromDt } } ] } : {}),
-          ...(toDt   ? { $or: [ { validFrom: { $exists:false } }, { validFrom: { $lte: toDt } } ] } : {}),
-        }
-      ];
-    }
-
-    const items = await TimeSlot.find(q)
-      .sort({ kind: 1, dow: 1, startISO: 1, startTime: 1 })
-      .limit(1000)
-      .lean();
-
-    res.json({ success: true, items });
-  } catch (e) {
-    console.error('GET /api/admin/slots error:', e);
-    res.status(500).json({ success:false, message:'Failed to list slots' });
-  }
-});
-
 /* ---------------- Schedule feed & Admin Slots ---------------- */
 
 // GET /api/schedule?from=YYYY-MM-DD&to=YYYY-MM-DD
@@ -764,6 +722,43 @@ app.get('/api/schedule', optionalAuth, async (req, res) => {
 const uploadAny = multer({ storage: multer.memoryStorage(), limits:{ fileSize: 10*1024*1024 } }).any();
 
 // Create
+
+/* === Admin: list slots (GET) === */
+app.get('/api/admin/slots', requireAdmin, async (req, res) => {
+  try {
+    const { from, to, kind, active } = req.query;
+    const q = {};
+    if (kind) q.kind = kind;
+    if (active === 'true') q.isActive = true;
+    if (active === 'false') q.isActive = false;
+
+    if (from || to) {
+      const fromDt = from ? new Date(from) : null;
+      const toDt   = to   ? new Date(to)   : null;
+      q.$or = [
+        { kind: 'oneoff',
+          ...(fromDt ? { endISO:   { $gte: fromDt } } : {}),
+          ...(toDt   ? { startISO: { $lte: toDt   } } : {}),
+        },
+        { kind: 'recurring',
+          ...(fromDt ? { $or: [ { validTo: { $exists:false } }, { validTo: { $gte: fromDt } } ] } : {}),
+          ...(toDt   ? { $or: [ { validFrom: { $exists:false } }, { validFrom: { $lte: toDt } } ] } : {}),
+        }
+      ];
+    }
+
+    const items = await TimeSlot.find(q)
+      .sort({ kind: 1, dow: 1, startISO: 1, startTime: 1 })
+      .limit(1000)
+      .lean();
+
+    res.json({ success: true, items });
+  } catch (e) {
+    console.error('GET /api/admin/slots error:', e);
+    res.status(500).json({ success:false, message:'Failed to list slots' });
+  }
+});
+
 app.post('/api/admin/slots', requireAdmin, async (req, res) => {
   try {
     const s = await TimeSlot.create(req.body);
