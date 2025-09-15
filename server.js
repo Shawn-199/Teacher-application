@@ -117,7 +117,7 @@ mongoose
 
 const { Schema, model } = mongoose;
 
-const UserSchema = new Schema({
+const UserSchema = new SchemaRef({
   email: { type: String, unique: true, required: true, index: true },
   passwordHash: { type: String, required: true },
   firstName: String,
@@ -127,8 +127,8 @@ const UserSchema = new Schema({
 }, { timestamps: true });
 const User = model('User', UserSchema);
 
-const BookingSchema = new Schema({
-  user: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+const BookingSchema = new SchemaRef({
+  user: { type: SchemaRef.Types.ObjectId, ref: 'User', required: true },
   email: { type: String, required: true },
   childName: { type: String, required: true },
   parentName: { type: String, required: true },
@@ -625,11 +625,11 @@ app.get('/api/my-bookings/latest', auth, async (req, res) => {
 
 /** === Injected: Calendar Models (TimeSlot, Lesson) === */
 const mongooseRef = (typeof mongoose !== 'undefined' && mongoose) ? mongoose : require('mongoose');
-const { Schema, model } = mongooseRef;
+const SchemaRef = (typeof Schema !== 'undefined') ? Schema : mongooseRef.Schema;
 
 let TimeSlot, Lesson;
 try { TimeSlot = mongooseRef.model('TimeSlot'); } catch(e) {
-  const TimeSlotSchema = new Schema({
+  const TimeSlotSchema = new SchemaRef({
     kind: { type: String, enum: ['oneoff','recurring'], default: 'oneoff' },
     validFrom: Date,
     validTo: Date,
@@ -646,8 +646,8 @@ try { TimeSlot = mongooseRef.model('TimeSlot'); } catch(e) {
   TimeSlot = mongooseRef.model('TimeSlot', TimeSlotSchema);
 }
 try { Lesson = mongooseRef.model('Lesson'); } catch(e) {
-  const LessonSchema = new Schema({
-    student: { type: Schema.Types.ObjectId, ref: 'User' },
+  const LessonSchema = new SchemaRef({
+    student: { type: SchemaRef.Types.ObjectId, ref: 'User' },
     email: String,
     title: { type: String, default: 'Lesson' },
     startISO: { type: Date, required: true },
@@ -660,6 +660,7 @@ try { Lesson = mongooseRef.model('Lesson'); } catch(e) {
   Lesson = mongooseRef.model('Lesson', LessonSchema);
 }
 /** === End Injected Models === */
+
 
 
 /** === Injected: /api/schedule (month feed) === */
@@ -688,12 +689,10 @@ app.get('/api/schedule', async (req, res) => {
     const out = [];
     const add = (type, title, start, end, extra={}) => out.push({ type, title, start, end, ...extra });
 
-    // oneoff slots
     slots.filter(s => s.kind==='oneoff').forEach(s => {
       add('slot', 'Available', s.startISO, s.endISO, { teacherName:s.teacherName });
     });
 
-    // recurring slots
     const dayMs = 24*60*60*1000;
     slots.filter(s => s.kind==='recurring').forEach(s => {
       const vFrom = s.validFrom ? new Date(s.validFrom) : from;
