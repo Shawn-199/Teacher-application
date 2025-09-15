@@ -5,12 +5,10 @@ const cors = require('cors');
 const nodemailer = require('nodemailer');
 const crypto = require('crypto');
 const mongoose = require('mongoose');
-// --- Safe Schema alias (injected) ---
-// Ensures SchemaRef is available before any model definitions.
-var SchemaRef = (typeof SchemaRef !== 'undefined') ? SchemaRef
-  : ((typeof Schema !== 'undefined') ? Schema
-     : ((typeof mongoose !== 'undefined' && mongoose && mongoose.Schema) ? mongoose.Schema
-        : require('mongoose').Schema));
+// --- Safe Schema alias (injected, v2) ---
+// Define SchemaRef without touching bare 'Schema' (avoids TDZ).
+var __MongooseLibForSchemaRef = (typeof mongoose !== 'undefined' && mongoose && mongoose.Schema) ? mongoose : require('mongoose');
+var SchemaRef = (typeof SchemaRef !== 'undefined' && SchemaRef) ? SchemaRef : __MongooseLibForSchemaRef.Schema;
 // --- End Safe Schema alias ---
 
 const bcrypt = require('bcryptjs');
