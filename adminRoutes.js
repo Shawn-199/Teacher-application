@@ -1,3 +1,5 @@
+const multer = require('multer');
+const xlsx = require('xlsx');
 // adminRoutes.js — Express Router for GE Admin Panel
 // Mount with: app.use('/api/admin', require('./adminRoutes'));
 const express = require('express');
@@ -134,5 +136,86 @@ router.get('/stats', requireAdmin, async (_req, res) => {
     byStatus: { Scheduled: scheduled, Completed: completed, Cancelled: cancelled, 'No-Show': noshow }
   });
 });
+// === Injected: Admin Slots & Import ===
+const uploadAny = multer({ storage: multer.memoryStorage(), limits:{ fileSize: 10*1024*1024 } }).any();
+
+const mongooseRefAR = (typeof mongoose !== 'undefined' && mongoose) ? mongoose : require('mongoose');
+const { Schema: ARSchema } = mongooseRefAR;
+
+let AR_TimeSlot;
+try { AR_TimeSlot = mongooseRefAR.model('TimeSlot'); } catch(e) {
+  const TimeSlotSchema = new ARSchema({
+    kind: { type: String, enum: ['oneoff','recurring'], default: 'oneoff' },
+    validFrom: Date,
+    validTo: Date,
+    dow: Number,
+    startTime: String,
+    endTime: String,
+    timeZone: String,
+    startISO: Date,
+    endISO: Date,
+    teacherName: { type: String, default: 'Teacher' },
+    note: String,
+    isActive: { type: Boolean, default: true }
+  }, { timestamps: true });
+  AR_TimeSlot = mongooseRefAR.model('TimeSlot', TimeSlotSchema);
+}
+
+// Create slot
+router.post('/api/admin/slots', requireAdmin, async (req, res) => {
+  try {
+    const s = await AR_TimeSlot.create(req.body);
+    res.json({ success:true, slot:s });
+  } catch (e) {
+    res.status(400).json({ success:false, message:e.message });
+  }
+});
+
+// Update slot
+router.patch('/api/admin/slots/:id', requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  const s = await AR_TimeSlot.findByIdAndUpdate(id, req.body, { new:true });
+  if(!s) return res.status(404).json({ success:false, message:'Not found' });
+  res.json({ success:true, slot:s });
+});
+
+// Delete slot
+router.delete('/api/admin/slots/:id', requireAdmin, async (req, res) => {
+  const ok = await AR_TimeSlot.findByIdAndDelete(req.params.id);
+  res.json({ success: !!ok });
+});
+
+// Import slots (CSV/XLSX)
+router.post('/api/admin/slots/import', requireAdmin, uploadAny, async (req, res) => {
+  const f = (req.files||[])[0];
+  if(!f) return res.status(400).json({ success:false, message:'File required' });
+
+  let rows = [];
+  try {
+    if (/\.xlsx?$/.test(f.originalname)) {
+      const wb = xlsx.read(f.buffer, { type:'buffer' });
+      rows = xlsx.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+    } else {
+      const text = f.buffer.toString('utf8');
+      rows = text.split(/
+?
+/).map(l => l.split(',')).filter(a => a.length>1)
+        .map(([kind,dow,startTime,endTime,validFrom,validTo,startISO,endISO,timeZone,teacherName]) => ({
+          kind, dow: dow? +dow : undefined,
+          startTime, endTime,
+          validFrom: validFrom? new Date(validFrom): undefined,
+          validTo:   validTo?   new Date(validTo):   undefined,
+          startISO:  startISO?  new Date(startISO):  undefined,
+          endISO:    endISO?    new Date(endISO):    undefined,
+          timeZone, teacherName
+        }));
+    }
+    const docs = await AR_TimeSlot.insertMany(rows.filter(r => r.kind));
+    res.json({ success:true, inserted: docs.length });
+  } catch (e) {
+    res.status(400).json({ success:false, message:String(e) });
+  }
+});
+// === End Injected: Admin Slots & Import ===
 
 module.exports = router;
