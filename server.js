@@ -5,6 +5,7 @@ const cors = require('cors');
 const nodemailer = require('nodemailer');
 const crypto = require('crypto');
 const mongoose = require('mongoose');
+const xlsx = require('xlsx');
 // --- Safe Schema alias (injected, v2) ---
 // Define SchemaRef without touching bare 'Schema' (avoids TDZ).
 var __MongooseLibForSchemaRef = (typeof mongoose !== 'undefined' && mongoose && mongoose.Schema) ? mongoose : require('mongoose');
@@ -148,6 +149,30 @@ const BookingSchema = new Schema({
   teacherName: { type: String, default: process.env.TEACHER_NAME || 'Teacher' }
 }, { timestamps: true });
 const Booking = model('Booking', BookingSchema);
+
+
+
+/* ---------------- Schedule Models (TimeSlot) ---------------- */
+let TimeSlot;
+try { TimeSlot = mongoose.model('TimeSlot'); } catch (e) {
+  const TimeSlotSchema = new SchemaRef({
+    kind: { type: String, enum: ['oneoff','recurring'], default: 'oneoff' },
+    // recurring:
+    validFrom: Date,
+    validTo: Date,
+    dow: Number,          // 0..6
+    startTime: String,    // "HH:mm"
+    endTime: String,      // "HH:mm"
+    timeZone: String,
+    // one-off:
+    startISO: Date,
+    endISO: Date,
+    teacherName: { type: String, default: process.env.TEACHER_NAME || 'Teacher' },
+    note: String,
+    isActive: { type: Boolean, default: true }
+  }, { timestamps: true });
+  TimeSlot = mongoose.model('TimeSlot', TimeSlotSchema);
+}
 
 /* ---------------- Mailer ---------------- */
 const transporter = nodemailer.createTransport({
@@ -609,6 +634,145 @@ app.get('/api/admin/stats', requireAdmin, async (_req, res) => {
     usersTotal, bookingsTotal,
     byStatus: { Scheduled: scheduled, Completed: completed, Cancelled: cancelled, 'No-Show': noshow }
   });
+});
+
+
+/* ---------------- Schedule feed & Admin Slots ---------------- */
+
+// GET /api/schedule?from=YYYY-MM-DD&to=YYYY-MM-DD
+app.get('/api/schedule', optionalAuth, async (req, res) => {
+  try {
+    const from = new Date(req.query.from);
+    const to   = new Date(req.query.to);
+    if (isNaN(from) || isNaN(to)) return res.status(400).json({ success:false, message:'Invalid range' });
+
+    // 1) Lessons from Bookings (use 60min default)
+    const lessons = await Booking.find({ createdAt: { $lte: to } }).lean(); // not perfect filter, but avoids full scan if indexed
+    const items = [];
+
+    function addItem(type, title, start, end, extra={}) {
+      items.push({ type, title, start, end, ...extra });
+    }
+
+    lessons.forEach(b => {
+      // build Date from dateStr + timeStr if possible
+      let start = null, end = null;
+      try {
+        const ds = String(b.dateStr||'').trim();
+        const ts = String(b.timeStr||'').trim();
+        if (ds) {
+          // try parse like YYYY-MM-DD and 19:30 (or "7:30 PM")
+          const date = new Date(ds + (ts ? (' ' + ts) : ''));
+          if (!isNaN(date)) {
+            start = date;
+            end = new Date(date.getTime() + 60*60*1000);
+          }
+        }
+      } catch(_) {}
+      if (start && end) {
+        addItem('lesson', b.level ? (b.level + ' Lesson') : 'Lesson', start, end, {
+          status: (b.status||'Scheduled'),
+          teacherName: b.teacherName || (process.env.TEACHER_NAME || 'Teacher')
+        });
+      }
+    });
+
+    // 2) Available slots from TimeSlot
+    const slots = await TimeSlot.find({
+      isActive: true,
+      $or: [
+        { kind:'oneoff', startISO:{ $lt: to }, endISO:{ $gt: from } },
+        { kind:'recurring', $and: [
+          { $or: [ { validFrom: { $exists:false } }, { validFrom: { $lte: to } } ] },
+          { $or: [ { validTo:   { $exists:false } }, { validTo:   { $gte: from } } ] }
+        ]}
+      ]
+    }).lean();
+
+    // oneoff slots
+    slots.filter(s => s.kind==='oneoff').forEach(s => {
+      addItem('slot', 'Available', s.startISO, s.endISO, { teacherName:s.teacherName });
+    });
+
+    // recurring slots
+    const dayMs = 24*60*60*1000;
+    slots.filter(s => s.kind==='recurring').forEach(s => {
+      const vFrom = s.validFrom ? new Date(s.validFrom) : from;
+      const vTo   = s.validTo   ? new Date(s.validTo)   : to;
+      const rangeStart = new Date(Math.max(vFrom.getTime(), from.getTime()));
+      const rangeEnd   = new Date(Math.min(vTo.getTime(),   to.getTime()));
+      for (let d = new Date(rangeStart); d < rangeEnd; d = new Date(d.getTime()+dayMs)) {
+        if (d.getDay() !== Number(s.dow)) continue;
+        const [sh, sm] = String(s.startTime||'0:0').split(':').map(Number);
+        const [eh, em] = String(s.endTime||'0:0').split(':').map(Number);
+        const start = new Date(d); start.setHours(sh, sm||0, 0, 0);
+        const end   = new Date(d); end.setHours(eh, em||0, 0, 0);
+        addItem('slot', 'Available', start, end, { teacherName:s.teacherName });
+      }
+    });
+
+    res.json({ success:true, items });
+  } catch (e) {
+    console.error('/api/schedule error:', e);
+    res.status(500).json({ success:false, message:'Failed to build schedule' });
+  }
+});
+
+// Admin Slots CRUD + Import (CSV/XLSX)
+const uploadAny = multer({ storage: multer.memoryStorage(), limits:{ fileSize: 10*1024*1024 } }).any();
+
+// Create
+app.post('/api/admin/slots', requireAdmin, async (req, res) => {
+  try {
+    const s = await TimeSlot.create(req.body);
+    res.json({ success:true, slot:s });
+  } catch (e) {
+    res.status(400).json({ success:false, message:e.message });
+  }
+});
+
+// Update
+app.patch('/api/admin/slots/:id', requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  const s = await TimeSlot.findByIdAndUpdate(id, req.body, { new:true });
+  if(!s) return res.status(404).json({ success:false, message:'Not found' });
+  res.json({ success:true, slot:s });
+});
+
+// Delete
+app.delete('/api/admin/slots/:id', requireAdmin, async (req, res) => {
+  const ok = await TimeSlot.findByIdAndDelete(req.params.id);
+  res.json({ success: !!ok });
+});
+
+// Import CSV/XLSX
+app.post('/api/admin/slots/import', requireAdmin, uploadAny, async (req, res) => {
+  const f = (req.files||[])[0];
+  if(!f) return res.status(400).json({ success:false, message:'File required' });
+
+  let rows = [];
+  try {
+    if (/\.xlsx?$/.test(f.originalname)) {
+      const wb = xlsx.read(f.buffer, { type:'buffer' });
+      rows = xlsx.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+    } else {
+      const text = f.buffer.toString('utf8');
+      rows = text.split(/\r?\n/).map(l => l.split(',')).filter(a => a.length>1)
+        .map(([kind,dow,startTime,endTime,validFrom,validTo,startISO,endISO,timeZone,teacherName]) => ({
+          kind, dow: dow? +dow : undefined,
+          startTime, endTime,
+          validFrom: validFrom? new Date(validFrom): undefined,
+          validTo:   validTo?   new Date(validTo):   undefined,
+          startISO:  startISO?  new Date(startISO):  undefined,
+          endISO:    endISO?    new Date(endISO):    undefined,
+          timeZone, teacherName
+        }));
+    }
+    const docs = await TimeSlot.insertMany(rows.filter(r => r && r.kind));
+    res.json({ success:true, inserted: docs.length });
+  } catch (e) {
+    res.status(400).json({ success:false, message:String(e) });
+  }
 });
 
 /* ---------------- Start ---------------- */
