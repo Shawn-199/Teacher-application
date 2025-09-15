@@ -5,6 +5,14 @@ const cors = require('cors');
 const nodemailer = require('nodemailer');
 const crypto = require('crypto');
 const mongoose = require('mongoose');
+// --- Safe Schema alias (injected) ---
+// Ensures SchemaRef is available before any model definitions.
+var SchemaRef = (typeof SchemaRef !== 'undefined') ? SchemaRef
+  : ((typeof Schema !== 'undefined') ? Schema
+     : ((typeof mongoose !== 'undefined' && mongoose && mongoose.Schema) ? mongoose.Schema
+        : require('mongoose').Schema));
+// --- End Safe Schema alias ---
+
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 require('dotenv').config();
@@ -117,7 +125,7 @@ mongoose
 
 const { Schema, model } = mongoose;
 
-const UserSchema = new SchemaRef({
+const UserSchema = new Schema({
   email: { type: String, unique: true, required: true, index: true },
   passwordHash: { type: String, required: true },
   firstName: String,
@@ -127,8 +135,8 @@ const UserSchema = new SchemaRef({
 }, { timestamps: true });
 const User = model('User', UserSchema);
 
-const BookingSchema = new SchemaRef({
-  user: { type: SchemaRef.Types.ObjectId, ref: 'User', required: true },
+const BookingSchema = new Schema({
+  user: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   email: { type: String, required: true },
   childName: { type: String, required: true },
   parentName: { type: String, required: true },
@@ -622,101 +630,3 @@ app.get('/api/my-bookings/latest', auth, async (req, res) => {
     res.status(500).json({ success:false, message:'Failed to fetch latest booking' });
   }
 });
-
-/** === Injected: Calendar Models (TimeSlot, Lesson) === */
-const mongooseRef = (typeof mongoose !== 'undefined' && mongoose) ? mongoose : require('mongoose');
-const SchemaRef = (typeof Schema !== 'undefined') ? Schema : mongooseRef.Schema;
-
-let TimeSlot, Lesson;
-try { TimeSlot = mongooseRef.model('TimeSlot'); } catch(e) {
-  const TimeSlotSchema = new SchemaRef({
-    kind: { type: String, enum: ['oneoff','recurring'], default: 'oneoff' },
-    validFrom: Date,
-    validTo: Date,
-    dow: Number,
-    startTime: String,
-    endTime: String,
-    timeZone: String,
-    startISO: Date,
-    endISO: Date,
-    teacherName: { type: String, default: 'Teacher' },
-    note: String,
-    isActive: { type: Boolean, default: true }
-  }, { timestamps: true });
-  TimeSlot = mongooseRef.model('TimeSlot', TimeSlotSchema);
-}
-try { Lesson = mongooseRef.model('Lesson'); } catch(e) {
-  const LessonSchema = new SchemaRef({
-    student: { type: SchemaRef.Types.ObjectId, ref: 'User' },
-    email: String,
-    title: { type: String, default: 'Lesson' },
-    startISO: { type: Date, required: true },
-    endISO:   { type: Date, required: true },
-    timeZone: String,
-    level: String,
-    status: { type: String, enum: ['Scheduled','Completed','Cancelled','No-Show','Rescheduled'], default: 'Scheduled' },
-    teacherName: { type: String, default: 'Teacher' }
-  }, { timestamps: true });
-  Lesson = mongooseRef.model('Lesson', LessonSchema);
-}
-/** === End Injected Models === */
-
-
-
-/** === Injected: /api/schedule (month feed) === */
-app.get('/api/schedule', async (req, res) => {
-  try {
-    const from = new Date(req.query.from);
-    const to   = new Date(req.query.to);
-    if (isNaN(from) || isNaN(to)) return res.status(400).json({ success:false, message:'Invalid range' });
-
-    const lessons = await Lesson.find({
-      startISO: { $lt: to }, endISO: { $gt: from },
-      status: { $ne: 'Cancelled' }
-    }).lean();
-
-    const slots = await TimeSlot.find({
-      isActive: true,
-      $or: [
-        { kind:'oneoff', startISO:{ $lt: to }, endISO:{ $gt: from } },
-        { kind:'recurring', $and: [
-          { $or: [ { validFrom: { $exists:false } }, { validFrom: { $lte: to } } ] },
-          { $or: [ { validTo:   { $exists:false } }, { validTo:   { $gte: from } } ] }
-        ]}
-      ]
-    }).lean();
-
-    const out = [];
-    const add = (type, title, start, end, extra={}) => out.push({ type, title, start, end, ...extra });
-
-    slots.filter(s => s.kind==='oneoff').forEach(s => {
-      add('slot', 'Available', s.startISO, s.endISO, { teacherName:s.teacherName });
-    });
-
-    const dayMs = 24*60*60*1000;
-    slots.filter(s => s.kind==='recurring').forEach(s => {
-      const vFrom = s.validFrom ? new Date(s.validFrom) : from;
-      const vTo   = s.validTo   ? new Date(s.validTo)   : to;
-      const rangeStart = new Date(Math.max(vFrom.getTime(), from.getTime()));
-      const rangeEnd   = new Date(Math.min(vTo.getTime(),   to.getTime()));
-      for (let d = new Date(rangeStart); d < rangeEnd; d = new Date(d.getTime()+dayMs)) {
-        if (d.getDay() !== Number(s.dow)) continue;
-        const [sh, sm] = String(s.startTime||'0:0').split(':').map(Number);
-        const [eh, em] = String(s.endTime||'0:0').split(':').map(Number);
-        const start = new Date(d); start.setHours(sh, sm||0, 0, 0);
-        const end   = new Date(d); end.setHours(eh, em||0, 0, 0);
-        add('slot', 'Available', start, end, { teacherName:s.teacherName });
-      }
-    });
-
-    lessons.forEach(l => add('lesson', l.title || 'Lesson', l.startISO, l.endISO, {
-      status: l.status, level: l.level, teacherName: l.teacherName
-    }));
-
-    res.json({ success:true, items: out });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ success:false, message:'Failed to build schedule' });
-  }
-});
-/** === End Injected /api/schedule === */
