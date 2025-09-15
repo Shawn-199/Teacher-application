@@ -218,6 +218,7 @@ function optionalAuth(req, res, next) {
   next();
 }
 
+
 /* -------- Admin guard (для /api/admin/*) -------- */
 const ADMIN_PAGE_SIZE_DEFAULT = 25;
 const LESSON_STATUSES = ['Scheduled','Completed','Cancelled','No-Show','Rescheduled'];
@@ -236,6 +237,7 @@ async function requireAdmin(req, res, next) {
     console.error('requireAdmin error:', e);
     return res.status(401).json({ success:false, message:'Invalid token' });
   }
+}
 
 /* -------- Admin whitelist (email-based) -------- */
 const ADMIN_WHITELIST = (process.env.ADMIN_WHITELIST || 'shakhrom.azimov99@gmail.com')
@@ -249,7 +251,6 @@ function requireAdminOrWhitelist(req, res, next) {
     const user = req.admin || req.user || {};
     const email = String(user.email || '').toLowerCase();
     const role  = String(user.role  || '').toLowerCase();
-
     if (role === 'admin' || role === 'owner' || role === 'manager' || ADMIN_WHITELIST.includes(email)) {
       return next();
     }
@@ -258,8 +259,6 @@ function requireAdminOrWhitelist(req, res, next) {
     return res.status(403).json({ success:false, message:'Admins only' });
   }
 }
-}
-
 /* ---------------- Health ---------------- */
 app.get('/health', (req, res) => res.json({ ok: true }));
 
