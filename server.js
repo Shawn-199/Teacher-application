@@ -236,6 +236,28 @@ async function requireAdmin(req, res, next) {
     console.error('requireAdmin error:', e);
     return res.status(401).json({ success:false, message:'Invalid token' });
   }
+
+/* -------- Admin whitelist (email-based) -------- */
+const ADMIN_WHITELIST = (process.env.ADMIN_WHITELIST || 'shakhrom.azimov99@gmail.com')
+  .split(',')
+  .map(s => s.trim().toLowerCase())
+  .filter(Boolean);
+
+// optionalAuth должен положить req.user, если есть токен
+function requireAdminOrWhitelist(req, res, next) {
+  try {
+    const user = req.admin || req.user || {};
+    const email = String(user.email || '').toLowerCase();
+    const role  = String(user.role  || '').toLowerCase();
+
+    if (role === 'admin' || role === 'owner' || role === 'manager' || ADMIN_WHITELIST.includes(email)) {
+      return next();
+    }
+    return res.status(403).json({ success:false, message:'Admins only' });
+  } catch (e) {
+    return res.status(403).json({ success:false, message:'Admins only' });
+  }
+}
 }
 
 /* ---------------- Health ---------------- */
@@ -724,7 +746,7 @@ const uploadAny = multer({ storage: multer.memoryStorage(), limits:{ fileSize: 1
 // Create
 
 /* === Admin: list slots (GET) === */
-app.get('/api/admin/slots', requireAdmin, async (req, res) => {
+app.get('/api/admin/slots', optionalAuth, requireAdminOrWhitelist, async (req, res) => {
   try {
     const { from, to, kind, active } = req.query;
     const q = {};
@@ -759,7 +781,7 @@ app.get('/api/admin/slots', requireAdmin, async (req, res) => {
   }
 });
 
-app.post('/api/admin/slots', requireAdmin, async (req, res) => {
+app.post('/api/admin/slots', optionalAuth, requireAdminOrWhitelist, async (req, res) => {
   try {
     const s = await TimeSlot.create(req.body);
     res.json({ success:true, slot:s });
@@ -769,7 +791,7 @@ app.post('/api/admin/slots', requireAdmin, async (req, res) => {
 });
 
 // Update
-app.patch('/api/admin/slots/:id', requireAdmin, async (req, res) => {
+app.patch('/api/admin/slots/:id', optionalAuth, requireAdminOrWhitelist, async (req, res) => {
   const { id } = req.params;
   const s = await TimeSlot.findByIdAndUpdate(id, req.body, { new:true });
   if(!s) return res.status(404).json({ success:false, message:'Not found' });
@@ -777,13 +799,13 @@ app.patch('/api/admin/slots/:id', requireAdmin, async (req, res) => {
 });
 
 // Delete
-app.delete('/api/admin/slots/:id', requireAdmin, async (req, res) => {
+app.delete('/api/admin/slots/:id', optionalAuth, requireAdminOrWhitelist, async (req, res) => {
   const ok = await TimeSlot.findByIdAndDelete(req.params.id);
   res.json({ success: !!ok });
 });
 
 // Import CSV/XLSX
-app.post('/api/admin/slots/import', requireAdmin, uploadAny, async (req, res) => {
+app.post('/api/admin/slots/import', optionalAuth, requireAdminOrWhitelist, uploadAny, async (req, res) => {
   const f = (req.files||[])[0];
   if(!f) return res.status(400).json({ success:false, message:'File required' });
 
