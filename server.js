@@ -218,7 +218,6 @@ function optionalAuth(req, res, next) {
   next();
 }
 
-
 /* -------- Admin guard (для /api/admin/*) -------- */
 const ADMIN_PAGE_SIZE_DEFAULT = 25;
 const LESSON_STATUSES = ['Scheduled','Completed','Cancelled','No-Show','Rescheduled'];
@@ -239,26 +238,6 @@ async function requireAdmin(req, res, next) {
   }
 }
 
-/* -------- Admin whitelist (email-based) -------- */
-const ADMIN_WHITELIST = (process.env.ADMIN_WHITELIST || 'shakhrom.azimov99@gmail.com')
-  .split(',')
-  .map(s => s.trim().toLowerCase())
-  .filter(Boolean);
-
-// optionalAuth должен положить req.user, если есть токен
-function requireAdminOrWhitelist(req, res, next) {
-  try {
-    const user = req.admin || req.user || {};
-    const email = String(user.email || '').toLowerCase();
-    const role  = String(user.role  || '').toLowerCase();
-    if (role === 'admin' || role === 'owner' || role === 'manager' || ADMIN_WHITELIST.includes(email)) {
-      return next();
-    }
-    return res.status(403).json({ success:false, message:'Admins only' });
-  } catch (e) {
-    return res.status(403).json({ success:false, message:'Admins only' });
-  }
-}
 /* ---------------- Health ---------------- */
 app.get('/health', (req, res) => res.json({ ok: true }));
 
@@ -662,78 +641,95 @@ app.get('/api/admin/stats', requireAdmin, async (_req, res) => {
 
 // GET /api/schedule?from=YYYY-MM-DD&to=YYYY-MM-DD
 
+// ---------------- Strict schedule feed (only admin-created lessons/slots) ----------------
 app.get('/api/schedule', optionalAuth, async (req, res) => {
   try {
     const from = new Date(req.query.from);
     const to   = new Date(req.query.to);
-    if (isNaN(from) || isNaN(to)) return res.status(400).json({ success:false, message:'Invalid range' });
-
-    const items = [];
-    function addItem(type, title, start, end, extra={}) {
-      if (!start || !end) return;
-      if (start < from || start > to) return;
-      items.push({ type, title, start, end, ...extra });
+    if (isNaN(from) || isNaN(to)) {
+      return res.status(400).json({ success:false, message:'Invalid range' });
     }
 
-    const bookings = await Booking.find({ status: { $in: ['Scheduled','Rescheduled'] } }).lean();
-    for (const b of bookings) {
+    const items = [];
+    const addItem = (type, title, start, end, extra = {}) => {
+      if (!start || !end) return;
+      const st = new Date(start);
+      const en = new Date(end);
+      if (isNaN(st) || isNaN(en)) return;
+      if (st < from || st > to) return;
+      items.push({ type, title, start: st, end: en, ...extra });
+    };
+
+    const lessons = await Booking.find({
+      status: { $in: ['Scheduled', 'Rescheduled'] }
+    }).lean();
+
+    for (const b of lessons) {
       try {
-        const ds = String(b.dateStr||'').trim();
-        const ts = String(b.timeStr||'').trim();
+        const ds = String(b.dateStr || '').trim();
+        const ts = String(b.timeStr || '').trim();
         if (!ds) continue;
+
         let start = new Date(ds + (ts ? (' ' + ts) : ''));
         if (isNaN(start)) {
           const m = ds.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
           if (m) {
-            const [_,dd,mm,yyyy] = m;
-            const hh = (ts.match(/^(\d{1,2})/)||[])[1] || '00';
-            const mi = (ts.match(/:(\d{2})/)||[])[1] || '00';
+            const [_, dd, mm, yyyy] = m;
+            const hh = (ts.match(/^(\d{1,2})/) || [])[1] || '00';
+            const mi = (ts.match(/:(\d{2})/) || [])[1] || '00';
             start = new Date(`${yyyy}-${mm}-${dd}T${hh.padStart(2,'0')}:${mi}:00`);
           }
         }
         if (isNaN(start)) continue;
-        const end = new Date(start.getTime() + 60*60*1000);
-        addItem('lesson', b.level ? (b.level + ' Lesson') : 'Lesson', start, end, {
-          status: (b.status||'Scheduled'),
-          teacherName: b.teacherName || (process.env.TEACHER_NAME || 'Teacher')
-        });
-      } catch(_) {}
+        const end = new Date(start.getTime() + 60 * 60 * 1000);
+
+        addItem(
+          'lesson',
+          b.level ? `${b.level} Lesson` : 'Lesson',
+          start,
+          end,
+          { status: b.status || 'Scheduled', teacherName: b.teacherName || (process.env.TEACHER_NAME || 'Teacher') }
+        );
+      } catch {}
     }
 
     const slots = await TimeSlot.find({
       isActive: true,
       $or: [
-        { kind:'oneoff', startISO:{ $lt: to }, endISO:{ $gt: from } },
-        { kind:'recurring', $and: [
-          { $or: [ { validFrom: { $exists:false } }, { validFrom: { $lte: to } } ] },
-          { $or: [ { validTo:   { $exists:false } }, { validTo:   { $gte: from } } ] }
-        ]}
+        { kind: 'oneoff', startISO: { $lt: to }, endISO: { $gt: from } },
+        {
+          kind: 'recurring',
+          $and: [
+            { $or: [ { validFrom: { $exists: false } }, { validFrom: { $lte: to } } ] },
+            { $or: [ { validTo:   { $exists: false } }, { validTo:   { $gte: from } } ] }
+          ]
+        }
       ]
     }).lean();
 
     for (const s of slots) {
-      if (s.kind!=='oneoff') continue;
-      addItem('slot', 'Available', s.startISO, s.endISO, { teacherName:s.teacherName });
+      if (s.kind !== 'oneoff') continue;
+      addItem('slot', 'Available', s.startISO, s.endISO, { teacherName: s.teacherName });
     }
 
-    const dayMs = 24*60*60*1000;
+    const dayMs = 24 * 60 * 60 * 1000;
     for (const s of slots) {
-      if (s.kind!=='recurring') continue;
+      if (s.kind !== 'recurring') continue;
       const vFrom = s.validFrom ? new Date(s.validFrom) : from;
       const vTo   = s.validTo   ? new Date(s.validTo)   : to;
-      const rangeStart = new Date(Math.max(vFrom.getTime(), from.getTime()));
-      const rangeEnd   = new Date(Math.min(vTo.getTime(),   to.getTime()));
-      for (let d = new Date(rangeStart); d < rangeEnd; d = new Date(d.getTime()+dayMs)) {
+      const rangeStart = new Date(max(vFrom.getTime(), from.getTime()));
+      const rangeEnd   = new Date(min(vTo.getTime(),   to.getTime()));
+      for (let d = new Date(rangeStart); d <= rangeEnd; d = new Date(d.getTime() + dayMs)) {
         if (d.getDay() !== Number(s.dow)) continue;
-        const [sh, sm] = String(s.startTime||'0:0').split(':').map(Number);
-        const [eh, em] = String(s.endTime||'0:0').split(':').map(Number);
-        const start = new Date(d); start.setHours(sh||0, sm||0, 0, 0);
-        const end   = new Date(d); end.setHours(eh||0, em||0, 0, 0);
-        addItem('slot', 'Available', start, end, { teacherName:s.teacherName });
+        const [sh, sm] = String(s.startTime || '0:0').split(':').map(Number);
+        const [eh, em] = String(s.endTime   || '0:0').split(':').map(Number);
+        const start = new Date(d); start.setHours(sh || 0, sm || 0, 0, 0);
+        const end   = new Date(d); end.setHours(eh || 0, em || 0, 0, 0);
+        addItem('slot', 'Available', start, end, { teacherName: s.teacherName });
       }
     }
 
-    res.json({ success:true, items });
+    res.json({ success: true, items });
   } catch (e) {
     console.error('/api/schedule error:', e);
     res.status(500).json({ success:false, message:'Failed to build schedule' });
@@ -821,7 +817,7 @@ const uploadAny = multer({ storage: multer.memoryStorage(), limits:{ fileSize: 1
 // Create
 
 /* === Admin: list slots (GET) === */
-app.get('/api/admin/slots', optionalAuth, requireAdminOrWhitelist, async (req, res) => {
+app.get('/api/admin/slots', requireAdmin, async (req, res) => {
   try {
     const { from, to, kind, active } = req.query;
     const q = {};
@@ -856,7 +852,7 @@ app.get('/api/admin/slots', optionalAuth, requireAdminOrWhitelist, async (req, r
   }
 });
 
-app.post('/api/admin/slots', optionalAuth, requireAdminOrWhitelist, async (req, res) => {
+app.post('/api/admin/slots', requireAdmin, async (req, res) => {
   try {
     const s = await TimeSlot.create(req.body);
     res.json({ success:true, slot:s });
@@ -866,7 +862,7 @@ app.post('/api/admin/slots', optionalAuth, requireAdminOrWhitelist, async (req, 
 });
 
 // Update
-app.patch('/api/admin/slots/:id', optionalAuth, requireAdminOrWhitelist, async (req, res) => {
+app.patch('/api/admin/slots/:id', requireAdmin, async (req, res) => {
   const { id } = req.params;
   const s = await TimeSlot.findByIdAndUpdate(id, req.body, { new:true });
   if(!s) return res.status(404).json({ success:false, message:'Not found' });
@@ -874,13 +870,13 @@ app.patch('/api/admin/slots/:id', optionalAuth, requireAdminOrWhitelist, async (
 });
 
 // Delete
-app.delete('/api/admin/slots/:id', optionalAuth, requireAdminOrWhitelist, async (req, res) => {
+app.delete('/api/admin/slots/:id', requireAdmin, async (req, res) => {
   const ok = await TimeSlot.findByIdAndDelete(req.params.id);
   res.json({ success: !!ok });
 });
 
 // Import CSV/XLSX
-app.post('/api/admin/slots/import', optionalAuth, requireAdminOrWhitelist, uploadAny, async (req, res) => {
+app.post('/api/admin/slots/import', requireAdmin, uploadAny, async (req, res) => {
   const f = (req.files||[])[0];
   if(!f) return res.status(400).json({ success:false, message:'File required' });
 
