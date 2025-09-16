@@ -1,4 +1,4 @@
-// server.js — Admin API + безопасный CORS preflight + статика admin-ui + ONE-TIME /set-password-once
+// server.js — Admin API + CORS + статика admin-ui + teacher application + schedule + admin bookings create
 const express = require('express');
 const multer = require('multer');
 const cors = require('cors');
@@ -6,34 +6,23 @@ const nodemailer = require('nodemailer');
 const crypto = require('crypto');
 const mongoose = require('mongoose');
 const xlsx = require('xlsx');
-// --- Safe Schema alias (injected, v2) ---
-// Define SchemaRef without touching bare 'Schema' (avoids TDZ).
-var __MongooseLibForSchemaRef = (typeof mongoose !== 'undefined' && mongoose && mongoose.Schema) ? mongoose : require('mongoose');
-var SchemaRef = (typeof SchemaRef !== 'undefined' && SchemaRef) ? SchemaRef : __MongooseLibForSchemaRef.Schema;
-// --- End Safe Schema alias ---
-
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-require('dotenv').config();
-
-// ---- Startup sanity checks ----
-function bootChecks() {
-  const missing = [];
-  if (!process.env.JWT_SECRET) missing.push('JWT_SECRET');
-  if (!process.env.MONGO_URI && !process.env.MONGODB_URI) missing.push('MONGO_URI or MONGODB_URI');
-  if (missing.length) {
-    console.error('[FATAL] Missing env:', missing.join(', '));
-  }
-}
-bootChecks();
-
-
-// === FFmpeg for audio conversion (WebM -> MP3) ===
 const ffmpegPath = require('ffmpeg-static');
 const ffmpeg = require('fluent-ffmpeg');
 const { Readable, PassThrough } = require('stream');
-ffmpeg.setFfmpegPath(ffmpegPath);
+require('dotenv').config();
 
+// ---- Startup sanity checks ----
+(function bootChecks() {
+  const missing = [];
+  if (!process.env.JWT_SECRET) missing.push('JWT_SECRET');
+  if (!process.env.MONGO_URI && !process.env.MONGODB_URI) missing.push('MONGO_URI or MONGODB_URI');
+  if (missing.length) console.error('[WARN] Missing env:', missing.join(', '));
+})();
+
+// === FFmpeg for audio conversion (WebM -> MP3) ===
+ffmpeg.setFfmpegPath(ffmpegPath);
 function bufferToStream(buffer) {
   const s = new Readable();
   s.push(buffer);
@@ -87,11 +76,11 @@ const corsOptions = {
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'x-user-email'],
   methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS','HEAD'],
   optionsSuccessStatus: 204,
-  preflightContinue: false, maxAge: 86400
+  preflightContinue: false,
+  maxAge: 86400
 };
 app.use(cors(corsOptions));
-
-// Универсальный handler для preflight (без шаблонов path-to-regexp)
+// Универсальный handler для preflight
 app.use((req, res, next) => {
   if (req.method === 'OPTIONS') {
     const origin = req.headers.origin;
@@ -116,9 +105,10 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/admin-ui', express.static('public', { extensions: ['html'], index: false }));
 
 /* ---------------- MongoDB ---------------- */
-if (!process.env.MONGO_URI) { console.error('Missing MONGO_URI in .env'); process.exit(1); }
+const MONGO_URI = process.env.MONGO_URI || process.env.MONGODB_URI;
+if (!MONGO_URI) { console.error('Missing MONGO_URI in .env'); process.exit(1); }
 mongoose
-  .connect(process.env.MONGO_URI, { dbName: 'grandenglish' })
+  .connect(MONGO_URI, { dbName: 'grandenglish' })
   .then(() => console.log('MongoDB connected'))
   .catch((e) => { console.error('Mongo connect error:', e); process.exit(1); });
 
@@ -142,20 +132,17 @@ const BookingSchema = new Schema({
   childAge: { type: Number },
   country: { type: String },
   timeZone: { type: String },
-  dateStr: { type: String, required: true },
-  timeStr: { type: String, required: true },
+  dateStr: { type: String, required: true },  // e.g. "2025-09-20"
+  timeStr: { type: String, required: true },  // e.g. "14:00"
   level:   { type: String, required: true },
   status:  { type: String, default: 'Scheduled' }, // Scheduled | Completed | Cancelled | No-Show | Rescheduled
   teacherName: { type: String, default: process.env.TEACHER_NAME || 'Teacher' }
 }, { timestamps: true });
 const Booking = model('Booking', BookingSchema);
 
-
-
-/* ---------------- Schedule Models (TimeSlot) ---------------- */
 let TimeSlot;
 try { TimeSlot = mongoose.model('TimeSlot'); } catch (e) {
-  const TimeSlotSchema = new SchemaRef({
+  const TimeSlotSchema = new Schema({
     kind: { type: String, enum: ['oneoff','recurring'], default: 'oneoff' },
     // recurring:
     validFrom: Date,
@@ -380,7 +367,7 @@ app.get('/api/me', optionalAuth, async (req, res) => {
   res.json({ success:true, user });
 });
 
-/* ---------------- Bookings ---------------- */
+/* ---------------- Bookings (student) ---------------- */
 
 // TRIAL booking — работает и с JWT, и без (гость)
 app.post('/api/bookings/trial', optionalAuth, async (req, res) => {
@@ -474,13 +461,25 @@ app.get('/api/my-bookings', auth, async (req, res) => {
   }
 });
 
+app.get('/api/my-bookings/latest', auth, async (req, res) => {
+  try {
+    const b = await Booking.findOne({ user: req.user.uid }).sort({ createdAt: -1 }).lean();
+    if (!b) return res.json({ success:true, booking: null });
+    if (b.status) b.status = String(b.status).toLowerCase();
+    res.json({ success:true, booking: b });
+  } catch (e) {
+    console.error('Latest booking error:', e);
+    res.status(500).json({ success:false, message:'Failed to fetch latest booking' });
+  }
+});
+
 app.post('/api/bookings/:id/cancel', auth, async (req, res) => {
   try {
     const { id } = req.params;
     if (!mongoose.isValidObjectId(id)) return res.status(400).json({ success:false, message:'Invalid booking id' });
     const b = await Booking.findOne({ _id: id, user: req.user.uid });
     if (!b) return res.status(404).json({ success:false, message:'Not found' });
-    b.status = 'Cancelled'; // keep casing consistent
+    b.status = 'Cancelled';
     await b.save();
     res.json({ success:true, booking: b });
   } catch (e) {
@@ -635,12 +634,46 @@ app.get('/api/admin/stats', requireAdmin, async (_req, res) => {
   });
 });
 
+/* ---------------- NEW: Admin create lesson ---------------- */
+app.post('/api/admin/bookings/create', requireAdmin, async (req, res) => {
+  try {
+    const { email, childName, parentName, childAge, country, timeZone, dateStr, timeStr, level, teacherName } = req.body || {};
+    if (!email || !childName || !parentName || !dateStr || !timeStr || !level) {
+      return res.status(400).json({ success:false, message:'Missing required fields: email, childName, parentName, dateStr, timeStr, level' });
+    }
+    let user = await User.findOne({ email: email.toLowerCase() });
+    if (!user) {
+      user = await User.create({
+        email: email.toLowerCase(),
+        passwordHash: await bcrypt.hash(Math.random().toString(36).slice(2), 10),
+        role: 'student',
+        isGuest: true
+      });
+    }
+    const booking = await Booking.create({
+      user: user._id,
+      email: user.email,
+      childName,
+      parentName,
+      childAge: childAge ?? null,
+      country: country || '',
+      timeZone: timeZone || '',
+      dateStr,
+      timeStr,
+      level,
+      status: 'Scheduled',
+      teacherName: teacherName || process.env.TEACHER_NAME || 'Teacher'
+    });
+    res.json({ success:true, booking });
+  } catch (e) {
+    console.error('Admin create lesson failed:', e);
+    res.status(500).json({ success:false, message:'Admin create lesson failed' });
+  }
+});
 
 /* ---------------- Schedule feed & Admin Slots ---------------- */
 
 // GET /api/schedule?from=YYYY-MM-DD&to=YYYY-MM-DD
-
-// ---------------- Strict schedule feed (only admin-created lessons/slots) ----------------
 app.get('/api/schedule', optionalAuth, async (req, res) => {
   try {
     const from = new Date(req.query.from);
@@ -659,6 +692,7 @@ app.get('/api/schedule', optionalAuth, async (req, res) => {
       items.push({ type, title, start: st, end: en, ...extra });
     };
 
+    // 1) Lessons from bookings
     const lessons = await Booking.find({
       status: { $in: ['Scheduled', 'Rescheduled'] }
     }).lean();
@@ -671,6 +705,7 @@ app.get('/api/schedule', optionalAuth, async (req, res) => {
 
         let start = new Date(ds + (ts ? (' ' + ts) : ''));
         if (isNaN(start)) {
+          // fallback DD.MM.YYYY
           const m = ds.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
           if (m) {
             const [_, dd, mm, yyyy] = m;
@@ -692,6 +727,7 @@ app.get('/api/schedule', optionalAuth, async (req, res) => {
       } catch {}
     }
 
+    // 2) Slots from TimeSlot
     const slots = await TimeSlot.find({
       isActive: true,
       $or: [
@@ -706,11 +742,13 @@ app.get('/api/schedule', optionalAuth, async (req, res) => {
       ]
     }).lean();
 
+    // One-off slots
     for (const s of slots) {
       if (s.kind !== 'oneoff') continue;
       addItem('slot', 'Available', s.startISO, s.endISO, { teacherName: s.teacherName });
     }
 
+    // Recurring slots expanded per day
     const dayMs = 24 * 60 * 60 * 1000;
     for (const s of slots) {
       if (s.kind !== 'recurring') continue;
@@ -735,12 +773,9 @@ app.get('/api/schedule', optionalAuth, async (req, res) => {
   }
 });
 
-// Admin Slots CRUD + Import (CSV/XLSX)
+// ===== Admin Slots CRUD + Import (CSV/XLSX) =====
 const uploadAny = multer({ storage: multer.memoryStorage(), limits:{ fileSize: 10*1024*1024 } }).any();
 
-// Create
-
-/* === Admin: list slots (GET) === */
 app.get('/api/admin/slots', requireAdmin, async (req, res) => {
   try {
     const { from, to, kind, active } = req.query;
@@ -785,7 +820,6 @@ app.post('/api/admin/slots', requireAdmin, async (req, res) => {
   }
 });
 
-// Update
 app.patch('/api/admin/slots/:id', requireAdmin, async (req, res) => {
   const { id } = req.params;
   const s = await TimeSlot.findByIdAndUpdate(id, req.body, { new:true });
@@ -793,13 +827,11 @@ app.patch('/api/admin/slots/:id', requireAdmin, async (req, res) => {
   res.json({ success:true, slot:s });
 });
 
-// Delete
 app.delete('/api/admin/slots/:id', requireAdmin, async (req, res) => {
   const ok = await TimeSlot.findByIdAndDelete(req.params.id);
   res.json({ success: !!ok });
 });
 
-// Import CSV/XLSX
 app.post('/api/admin/slots/import', requireAdmin, uploadAny, async (req, res) => {
   const f = (req.files||[])[0];
   if(!f) return res.status(400).json({ success:false, message:'File required' });
@@ -833,16 +865,3 @@ app.post('/api/admin/slots/import', requireAdmin, uploadAny, async (req, res) =>
 const PORT = process.env.PORT || 5000;
 const HOST = process.env.HOST || '0.0.0.0';
 app.listen(PORT, HOST, () => console.log(`Server is running on port ${PORT}`));
-
-// Latest booking helper
-app.get('/api/my-bookings/latest', auth, async (req, res) => {
-  try {
-    const b = await Booking.findOne({ user: req.user.uid }).sort({ createdAt: -1 }).lean();
-    if (!b) return res.json({ success:true, booking: null });
-    if (b.status) b.status = String(b.status).toLowerCase();
-    res.json({ success:true, booking: b });
-  } catch (e) {
-    console.error('Latest booking error:', e);
-    res.status(500).json({ success:false, message:'Failed to fetch latest booking' });
-  }
-});
