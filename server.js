@@ -251,9 +251,8 @@ app.post('/submit', upload.any(), async (req, res) => {
     const files = {};
     for (const f of (req.files || [])) files[f.fieldname] = f;
 
-    
     console.log('FILES:', (req.files || []).map(f => ({ field: f.fieldname, name: f.originalname, size: f.size, type: f.mimetype })));
-const fQ1 = files['audioQ1'] || null;
+    const fQ1 = files['audioQ1'] || null;
     const fQ2 = files['audioQ2'] || null;
     const fMain = files['audio'] || null;
     const fCV = files['cv'] || files['resume'] || files['cvFile'] || null;
@@ -276,7 +275,6 @@ const fQ1 = files['audioQ1'] || null;
     const a2 = await normalizeToMp3(fQ2, 'speaking-q2.webm');
     const aMain = await normalizeToMp3(fMain, 'speaking-assessment.webm');
 
-    
     // Collect attachments: CV + audio (deduplicated)
     const attachments = [];
     function pushUnique(att) {
@@ -309,7 +307,8 @@ const fQ1 = files['audioQ1'] || null;
     if (a1)    pushUnique(a1);
     if (a2)    pushUnique(a2);
     if (aMain) pushUnique(aMain);
-await sendEmail({
+
+    await sendEmail({
       to: ADMIN_TO,
       subject: `🎓 Новая заявка от ${fullname}`,
       html: `
@@ -481,7 +480,7 @@ app.post('/api/bookings/:id/cancel', auth, async (req, res) => {
     if (!mongoose.isValidObjectId(id)) return res.status(400).json({ success:false, message:'Invalid booking id' });
     const b = await Booking.findOne({ _id: id, user: req.user.uid });
     if (!b) return res.status(404).json({ success:false, message:'Not found' });
-    b.status = 'cancelled';
+    b.status = 'Cancelled'; // keep casing consistent
     await b.save();
     res.json({ success:true, booking: b });
   } catch (e) {
@@ -717,8 +716,8 @@ app.get('/api/schedule', optionalAuth, async (req, res) => {
       if (s.kind !== 'recurring') continue;
       const vFrom = s.validFrom ? new Date(s.validFrom) : from;
       const vTo   = s.validTo   ? new Date(s.validTo)   : to;
-      const rangeStart = new Date(max(vFrom.getTime(), from.getTime()));
-      const rangeEnd   = new Date(min(vTo.getTime(),   to.getTime()));
+      const rangeStart = new Date(Math.max(vFrom.getTime(), from.getTime()));
+      const rangeEnd   = new Date(Math.min(vTo.getTime(),   to.getTime()));
       for (let d = new Date(rangeStart); d <= rangeEnd; d = new Date(d.getTime() + dayMs)) {
         if (d.getDay() !== Number(s.dow)) continue;
         const [sh, sm] = String(s.startTime || '0:0').split(':').map(Number);
@@ -730,81 +729,6 @@ app.get('/api/schedule', optionalAuth, async (req, res) => {
     }
 
     res.json({ success: true, items });
-  } catch (e) {
-    console.error('/api/schedule error:', e);
-    res.status(500).json({ success:false, message:'Failed to build schedule' });
-  }
-});
-
-const to   = new Date(req.query.to);
-    if (isNaN(from) || isNaN(to)) return res.status(400).json({ success:false, message:'Invalid range' });
-
-    // 1) Lessons from Bookings (use 60min default)
-    const lessons = await Booking.find({ createdAt: { $lte: to } }).lean(); // not perfect filter, but avoids full scan if indexed
-    const items = [];
-
-    function addItem(type, title, start, end, extra={}) {
-      items.push({ type, title, start, end, ...extra });
-    }
-
-    lessons.forEach(b => {
-      // build Date from dateStr + timeStr if possible
-      let start = null, end = null;
-      try {
-        const ds = String(b.dateStr||'').trim();
-        const ts = String(b.timeStr||'').trim();
-        if (ds) {
-          // try parse like YYYY-MM-DD and 19:30 (or "7:30 PM")
-          const date = new Date(ds + (ts ? (' ' + ts) : ''));
-          if (!isNaN(date)) {
-            start = date;
-            end = new Date(date.getTime() + 60*60*1000);
-          }
-        }
-      } catch(_) {}
-      if (start && end) {
-        addItem('lesson', b.level ? (b.level + ' Lesson') : 'Lesson', start, end, {
-          status: (b.status||'Scheduled'),
-          teacherName: b.teacherName || (process.env.TEACHER_NAME || 'Teacher')
-        });
-      }
-    });
-
-    // 2) Available slots from TimeSlot
-    const slots = await TimeSlot.find({
-      isActive: true,
-      $or: [
-        { kind:'oneoff', startISO:{ $lt: to }, endISO:{ $gt: from } },
-        { kind:'recurring', $and: [
-          { $or: [ { validFrom: { $exists:false } }, { validFrom: { $lte: to } } ] },
-          { $or: [ { validTo:   { $exists:false } }, { validTo:   { $gte: from } } ] }
-        ]}
-      ]
-    }).lean();
-
-    // oneoff slots
-    slots.filter(s => s.kind==='oneoff').forEach(s => {
-      addItem('slot', 'Available', s.startISO, s.endISO, { teacherName:s.teacherName });
-    });
-
-    // recurring slots
-    const dayMs = 24*60*60*1000;
-    slots.filter(s => s.kind==='recurring').forEach(s => {
-      const vFrom = s.validFrom ? new Date(s.validFrom) : from;
-      const vTo   = s.validTo   ? new Date(s.validTo)   : to;
-      const rangeStart = new Date(Math.max(vFrom.getTime(), from.getTime()));
-      const rangeEnd   = new Date(Math.min(vTo.getTime(),   to.getTime()));
-      for (let d = new Date(rangeStart); d < rangeEnd; d = new Date(d.getTime()+dayMs)) {
-        if (d.getDay() !== Number(s.dow)) continue;
-        const [sh, sm] = String(s.startTime||'0:0').split(':').map(Number);
-        const [eh, em] = String(s.endTime||'0:0').split(':').map(Number);
-        const start = new Date(d); start.setHours(sh, sm||0, 0, 0);
-        const end   = new Date(d); end.setHours(eh, em||0, 0, 0);
-        addItem('slot', 'Available', start, end, { teacherName:s.teacherName });
-      }
-    });
-
-    res.json({ success:true, items });
   } catch (e) {
     console.error('/api/schedule error:', e);
     res.status(500).json({ success:false, message:'Failed to build schedule' });
