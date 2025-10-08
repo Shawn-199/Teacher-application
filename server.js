@@ -167,9 +167,20 @@ const transporter = nodemailer.createTransport({
   auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS }
 });
 const ADMIN_TO = process.env.ADMIN_BOOKINGS_TO || process.env.NOTIFY_TO || process.env.EMAIL_USER;
+
+// Verify SMTP on startup (non-blocking)
+(async () => {
+  try {
+    await transporter.verify();
+    console.log('[MAIL] SMTP verified for', process.env.EMAIL_USER);
+  } catch (e) {
+    console.error('[MAIL] SMTP verify failed:', e.message);
+  }
+})();
 async function sendEmail(opts) {
-  try { await transporter.sendMail({ from: `"Grand English Courses" <${process.env.EMAIL_USER}>`, ...opts }); }
-  catch (e) { console.error('Email error:', e.message); }
+  const info = await transporter.sendMail({ from: `"Grand English Courses" <${process.env.EMAIL_USER}>`, ...opts });
+  console.log('[MAIL] sent:', info.messageId, 'to:', opts.to);
+  return info;
 }
 
 /* ---------------- JWT ---------------- */
@@ -311,6 +322,17 @@ app.post('/submit', upload.any(), async (req, res) => {
       `,
       attachments
     });
+    // Acknowledgement to applicant
+    await sendEmail({
+      to: email,
+      subject: `We received your application – Grand English Courses`,
+      html: `
+        <h2>Thanks for applying!</h2>
+        <p>Hi ${fullname || 'Candidate'}, we received your application and attachments.</p>
+        <p>We’ll review your CV and audio answers and get back to you.</p>
+      `
+    });
+
 
     res.status(201).json({ success:true, message:'Application submitted and email sent' });
   } catch (err) {
@@ -408,7 +430,30 @@ app.post('/api/bookings/trial', optionalAuth, async (req, res) => {
       teacherName: process.env.TEACHER_NAME || 'Teacher'
     });
 
-    res.json({ success:true, booking });
+    
+    // Emails: admin and student
+    await sendEmail({
+      to: ADMIN_TO,
+      subject: `🗓️ New TRIAL booking: ${booking.childName || childName || 'Student'} (${date} ${time})`,
+      html: `
+        <h2>New trial booking</h2>
+        <p><strong>Email:</strong> ${booking.email}</p>
+        <p><strong>Child:</strong> ${booking.childName || '—'}</p>
+        <p><strong>Parent:</strong> ${booking.parentName || '—'}</p>
+        <p><strong>Level:</strong> ${level || booking.level}</p>
+        <p><strong>Date & Time:</strong> ${date} ${time} (${timeZone||booking.timeZone||'—'})</p>
+      `
+    });
+    await sendEmail({
+      to: booking.email,
+      subject: `Your trial is booked: ${date} ${time}`,
+      html: `
+        <h2>Trial booked ✅</h2>
+        <p>See you on ${date} at ${time} (${timeZone||'your time'})</p>
+        <p>If you need to reschedule, reply to this email at least 5 hours in advance.</p>
+      `
+    });
+res.json({ success:true, booking });
   } catch (e) {
     console.error('Trial booking error:', e);
     res.status(500).json({ success:false, message:'Booking failed' });
@@ -430,9 +475,36 @@ app.post('/api/book', auth, async (req, res) => {
       teacherName: process.env.TEACHER_NAME || 'Teacher'
     });
 
+    // Confirmation to student
+    await sendEmail({
+      to: email,
+      subject: `Your lesson is booked: ${date} ${time}`,
+      html: `
+        <h2>Booking confirmed ✅</h2>
+        <p><strong>Child:</strong> ${childName}</p>
+        <p><strong>Date & Time:</strong> ${date} ${time} (${timeZone||'—'})</p>
+        <p><strong>Level:</strong> ${level}</p>
+        <p>If you need to reschedule (≥5 hours before), just reply to this email.</p>
+      `
+    });
+    // Confirmation to student
+    await sendEmail({
+      to: email,
+      subject: `Your lesson is booked: ${date} ${time}`,
+      html: `
+        <h2>Booking confirmed ✅</h2>
+        <p><strong>Child:</strong> ${childName}</p>
+        <p><strong>Date & Time:</strong> ${date} ${time} (${timeZone||'—'})</p>
+        <p><strong>Level:</strong> ${level}</p>
+        <p>If you need to reschedule (≥5 hours before), just reply to this email.</p>
+      `
+    });
+
+
+
     await sendEmail({
       to: ADMIN_TO,
-      subject: `🗓️ New trial booking: ${childName} (${date} ${time})`,
+      subject: `🗓️ New booking: ${childName} (${date} ${time})`,
       html: `
         <h2>New booking</h2>
         <p><strong>Child:</strong> ${childName}</p>
