@@ -411,7 +411,37 @@ app.post('/api/bookings/trial', optionalAuth, async (req, res) => {
     });
 
     res.json({ success: true, booking });
-setImmediate(() => {
+
+    // Emails in background for trial booking
+    setImmediate(() => {
+      // Admin
+      sendEmail({
+        to: ADMIN_TO,
+        subject: `🗓️ New trial booking: ${booking.childName} (${booking.dateStr} ${booking.timeStr})`,
+        html: `
+          <h2>New trial booking</h2>
+          <p><strong>Child:</strong> ${booking.childName}</p>
+          <p><strong>Parent:</strong> ${booking.parentName}</p>
+          <p><strong>Email:</strong> ${booking.email}</p>
+          <p><strong>Level:</strong> ${booking.level}</p>
+          <p><strong>Date & Time:</strong> ${booking.dateStr} ${booking.timeStr}${booking.timeZone ? ` (${booking.timeZone})` : ''}</p>
+        `
+      }).catch(e => console.error('Email error (trial admin, background):', e && e.message ? e.message : e));
+    });
+    setImmediate(() => {
+      // Student
+      sendEmail({
+        to: booking.email,
+        subject: `Your trial lesson is scheduled (${booking.dateStr} ${booking.timeStr})`,
+        html: `
+          <h2>Your trial lesson is scheduled ✅</h2>
+          <p><strong>Date & Time:</strong> ${booking.dateStr} ${booking.timeStr}${booking.timeZone ? ` (${booking.timeZone})` : ''}</p>
+          <p><strong>Teacher:</strong> ${booking.teacherName || 'Teacher'}</p>
+          <p>If you have questions, just reply to this email.</p>
+        `
+      }).catch(e => console.error('Email error (trial student, background):', e && e.message ? e.message : e));
+    });
+    setImmediate(() => {
   // Admin trial notification
   sendEmail({
     to: ADMIN_TO,
@@ -461,7 +491,38 @@ app.post('/api/book', auth, async (req, res) => {
     });
 
     res.json({ success: true, booking });
-setImmediate(() => {
+
+    // Send emails in background using saved booking object
+    setImmediate(() => {
+      // Admin
+      sendEmail({
+        to: ADMIN_TO,
+        subject: `🗓️ New booking: ${booking.childName} (${booking.dateStr} ${booking.timeStr})`,
+        html: `
+          <h2>New booking</h2>
+          <p><strong>Child:</strong> ${booking.childName}</p>
+          <p><strong>Parent:</strong> ${booking.parentName}</p>
+          <p><strong>Email:</strong> ${booking.email}</p>
+          <p><strong>Level:</strong> ${booking.level}</p>
+          <p><strong>Date & Time:</strong> ${booking.dateStr} ${booking.timeStr}${booking.timeZone ? ` (${booking.timeZone})` : ''}</p>
+          <p><strong>Country:</strong> ${booking.country || '—'}</p>
+        `
+      }).catch(e => console.error('Email error (book admin, background):', e && e.message ? e.message : e));
+    });
+    setImmediate(() => {
+      // Student
+      sendEmail({
+        to: booking.email,
+        subject: `Your lesson is scheduled (${booking.dateStr} ${booking.timeStr})`,
+        html: `
+          <h2>Your lesson is scheduled ✅</h2>
+          <p><strong>Date & Time:</strong> ${booking.dateStr} ${booking.timeStr}${booking.timeZone ? ` (${booking.timeZone})` : ''}</p>
+          <p><strong>Teacher:</strong> ${booking.teacherName || 'Teacher'}</p>
+          <p>If you have questions, just reply to this email.</p>
+        `
+      }).catch(e => console.error('Email error (book student, background):', e && e.message ? e.message : e));
+    });
+    setImmediate(() => {
   // Admin notification
   sendEmail({
 to: ADMIN_TO,
@@ -647,8 +708,9 @@ app.patch('/api/admin/bookings/:id/status', requireAdmin, async (req, res) => {
 
   await b.save();
 
-  // (опционально) письмо родителю/студенту
-  if (notifyEmail && b.email) {
+  
+  // Notify student (if email exists)
+  if (b.email) {
     const statusText = b.status;
     const html = `
       <h2>Update for your lesson</h2>
@@ -657,28 +719,29 @@ app.patch('/api/admin/bookings/:id/status', requireAdmin, async (req, res) => {
       <p><strong>Teacher:</strong> ${b.teacherName || '—'}</p>
       <p>If you have questions, just reply to this email.</p>
     `;
-    sendEmail({ to: b.email, subject: `Lesson status updated: ${statusText}`, html }).catch(()=>{});
-  
+    setImmediate(() => {
+      sendEmail({ to: b.email, subject: `Lesson status updated: ${statusText}`, html })
+        .catch(() => {});
+    });
+  }
+  // Notify admin
   setImmediate(() => {
-  sendEmail({
-    to: ADMIN_TO,
-    subject: `Lesson status changed: ${statusText}`,
-    html: `
-      <h2>Lesson status changed</h2>
-      <p><strong>Status:</strong> ${statusText}</p>
-      <p><strong>Child:</strong> ${b.childName || '—'}</p>
-      <p><strong>Parent:</strong> ${b.parentName || '—'}</p>
-      <p><strong>Email:</strong> ${b.email || '—'}</p>
-      <p><strong>Date & Time:</strong> ${b.dateStr || '—'} ${b.timeStr || ''}</p>
-      <p><strong>Teacher:</strong> ${b.teacherName || '—'}</p>
-    `
-  }).catch(e => console.error('Email error (status admin, background):', e && e.message ? e.message : e));
+    sendEmail({
+      to: ADMIN_TO,
+      subject: `Lesson status changed: ${b.status}`,
+      html: `
+        <h2>Lesson status changed</h2>
+        <p><strong>Status:</strong> ${b.status}</p>
+        <p><strong>Child:</strong> ${b.childName || '—'}</p>
+        <p><strong>Parent:</strong> ${b.parentName || '—'}</p>
+        <p><strong>Email:</strong> ${b.email || '—'}</p>
+        <p><strong>Date & Time:</strong> ${b.dateStr || '—'} ${b.timeStr || ''}</p>
+        <p><strong>Teacher:</strong> ${b.teacherName || '—'}</p>
+      `
+    }).catch(e => console.error('Email error (status admin, background):', e && e.message ? e.message : e));
+  });
+res.json({ success:true, booking: b });
 });
-}
-
-  res.json({ success:true, booking: b });
-});
-
 // GET /api/admin/stats — сводка
 app.get('/api/admin/stats', requireAdmin, async (_req, res) => {
   const [usersTotal, bookingsTotal, scheduled, completed, cancelled, noshow] = await Promise.all([
