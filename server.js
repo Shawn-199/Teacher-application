@@ -161,12 +161,15 @@ try { TimeSlot = mongoose.model('TimeSlot'); } catch (e) {
   TimeSlot = mongoose.model('TimeSlot', TimeSlotSchema);
 }
 
-/* ---------------- Mailer ---------------- */
+/* ---------------- Mailer (Brevo SMTP 2525) ---------------- */
 const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 465,
-  secure: true,
-  auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
+  host: process.env.SMTP_HOST || 'smtp-relay.brevo.com',
+  port: process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT) : 2525,
+  secure: false, // порт 2525 не требует SSL
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS
+  },
   pool: true,
   maxConnections: 1,
   maxMessages: 50,
@@ -176,12 +179,12 @@ const transporter = nodemailer.createTransport({
   family: 4
 });
 
-// Test connection on startup
+// Проверка соединения при запуске
 transporter.verify((error, success) => {
   if (error) {
-    console.error('SMTP connection failed:', error && (error.stack || error));
+    console.error('❌ Brevo SMTP connection failed:', error.message);
   } else {
-    console.log('SMTP server is ready to take messages via smtp.gmail.com:465');
+    console.log('✅ Brevo SMTP server is ready on port 2525');
   }
 });
 
@@ -196,10 +199,10 @@ async function sendEmail(opts) {
       from: `"Grand English Courses" <${process.env.EMAIL_USER}>`,
       ...opts
     });
-    console.log('Email sent successfully to:', opts.to);
+    console.log('📧 Email sent successfully to:', opts.to);
     return true;
   } catch (e) {
-    console.error('Email send failed:', e.message);
+    console.error('❌ Email send failed:', e.message);
     return false;
   }
 }
