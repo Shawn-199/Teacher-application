@@ -41,8 +41,6 @@ async function webmToMp3(buffer) {
       .inputFormat('webm')
       .noVideo()
       .audioCodec('libmp3lame')
-      .audioBitrate(64)
-      .audioFrequency(22050)
       .format('mp3')
       .on('error', reject)
       .pipe(output, { end: true });
@@ -166,14 +164,10 @@ try { TimeSlot = mongoose.model('TimeSlot'); } catch (e) {
 /* ---------------- Mailer ---------------- */
 const transporter = nodemailer.createTransport({
   service: 'gmail',
-  pool: true,
-  maxConnections: 3,
-  maxMessages: 50,
-  connectionTimeout: 15000,
-  socketTimeout: 20000,
-  auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS }});
+  auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS }
+});
 const ADMIN_TO = process.env.ADMIN_BOOKINGS_TO || process.env.NOTIFY_TO || process.env.EMAIL_USER;
-async async function sendEmail(opts) {
+async function sendEmail(opts) {
   try { await transporter.sendMail({ from: `"Grand English Courses" <${process.env.EMAIL_USER}>`, ...opts }); }
   catch (e) { console.error('Email error:', e.message); }
 }
@@ -301,11 +295,9 @@ app.post('/submit', upload.any(), async (req, res) => {
     if (a2)    pushUnique(a2);
     if (aMain) pushUnique(aMain);
 
-    /* email moved to background */
-
     res.status(201).json({ success:true, message:'Application submitted and email sent' });
-    setImmediate(() => {
-      sendEmail({
+setImmediate(() => {
+  sendEmail({
 to: ADMIN_TO,
       subject: `🎓 Новая заявка от ${fullname}`,
       html: `
@@ -320,9 +312,10 @@ to: ADMIN_TO,
         <p><strong>Тест:</strong> ${quizScore}/20 (${quizPercentage}%)</p>
       `,
       attachments
-      }).catch(e => console.error('Email error (submit, background):', e && e.message ? e.message : e));
-    });
-  } catch (err) {
+    
+  }).catch(e => console.error('Email error (submit, background):', e && e.message ? e.message : e));
+});
+} catch (err) {
     console.error('Error submitting application:', err);
     res.status(500).json({ success:false, message:'Internal server error', error: err.message });
   }
@@ -418,36 +411,34 @@ app.post('/api/bookings/trial', optionalAuth, async (req, res) => {
     });
 
     res.json({ success: true, booking });
-
-    // Emails in background (admin + student)
-    setImmediate(() => {
-      // Admin
-      sendEmail({
-        to: ADMIN_TO,
-        subject: `🗓️ New trial booking: ${'${childName}'} (${ '${date}' } ${ '${time}' })`,
-        html: `
-          <h2>New trial booking</h2>
-          <p><strong>Child:</strong> ${'${childName}'}</p>
-          <p><strong>Parent:</strong> ${'${parentName || "Parent"}'}</p>
-          <p><strong>Email:</strong> ${'${userDoc.email}'}</p>
-          <p><strong>Level:</strong> ${'${level || "Beginner"}'}</p>
-          <p><strong>Date & Time:</strong> ${'${date}'} ${'${time}'}${'${timeZone ? ` (${timeZone})` : ""}'}</p>
-        `
-      }).catch(e => console.error('Email error (trial admin, background):', e && e.message ? e.message : e));
-
-      // Student
-      sendEmail({
-        to: userDoc.email,
-        subject: `Your trial lesson is scheduled (${ '${date}' } ${ '${time}' })`,
-        html: `
-          <h2>Your trial lesson is scheduled ✅</h2>
-          <p><strong>Date & Time:</strong> ${'${date}'} ${'${time}'}${'${timeZone ? ` (${timeZone})` : ""}'}</p>
-          <p><strong>Teacher:</strong> ${'${process.env.TEACHER_NAME || "Teacher"}'}</p>
-          <p>If you have questions, just reply to this email.</p>
-        `
-      }).catch(e => console.error('Email error (trial student, background):', e && e.message ? e.message : e));
-    });
-    
+setImmediate(() => {
+  // Admin trial notification
+  sendEmail({
+    to: ADMIN_TO,
+    subject: `🗓️ New trial booking: ${childName} (${date} ${time})`,
+    html: `
+      <h2>New trial booking</h2>
+      <p><strong>Child:</strong> ${childName}</p>
+      <p><strong>Parent:</strong> ${parentName || 'Parent'}</p>
+      <p><strong>Email:</strong> ${userDoc.email}</p>
+      <p><strong>Level:</strong> ${level || 'Beginner'}</p>
+      <p><strong>Date & Time:</strong> ${date} ${time}${timeZone ? ` (${timeZone})` : ''}</p>
+    `
+  }).catch(e => console.error('Email error (trial admin, background):', e && e.message ? e.message : e));
+});
+setImmediate(() => {
+  // Student trial confirmation
+  sendEmail({
+    to: userDoc.email,
+    subject: `Your trial lesson is scheduled (${date} ${time})`,
+    html: `
+      <h2>Your trial lesson is scheduled ✅</h2>
+      <p><strong>Date & Time:</strong> ${date} ${time}${timeZone ? ` (${timeZone})` : ''}</p>
+      <p><strong>Teacher:</strong> ${process.env.TEACHER_NAME || 'Teacher'}</p>
+      <p>If you have questions, just reply to this email.</p>
+    `
+  }).catch(e => console.error('Email error (trial student, background):', e && e.message ? e.message : e));
+});
 } catch (e) {
     console.error('Trial booking error:', e);
     res.status(500).json({ success:false, message:'Booking failed' });
@@ -469,11 +460,10 @@ app.post('/api/book', auth, async (req, res) => {
       teacherName: process.env.TEACHER_NAME || 'Teacher'
     });
 
-    /* email moved to background */
-
     res.json({ success: true, booking });
-    setImmediate(() => {
-      sendEmail({
+setImmediate(() => {
+  // Admin notification
+  sendEmail({
 to: ADMIN_TO,
       subject: `🗓️ New trial booking: ${childName} (${date} ${time})`,
       html: `
@@ -485,9 +475,23 @@ to: ADMIN_TO,
         <p><strong>Date & Time:</strong> ${date} ${time} (${timeZone||'—'})</p>
         <p><strong>Country:</strong> ${country||'—'}</p>
       `
-      }).catch(e => console.error('Email error (book, background):', e && e.message ? e.message : e));
-    });
-  } catch (e) {
+    
+  }).catch(e => console.error('Email error (book admin, background):', e && e.message ? e.message : e));
+});
+setImmediate(() => {
+  // Student confirmation
+  sendEmail({
+    to: email,
+    subject: `Your trial lesson is scheduled (${date} ${time})`,
+    html: `
+      <h2>Your trial lesson is scheduled ✅</h2>
+      <p><strong>Date & Time:</strong> ${date} ${time}${timeZone ? ` (${timeZone})` : ''}</p>
+      <p><strong>Teacher:</strong> ${process.env.TEACHER_NAME || 'Teacher'}</p>
+      <p>If you have questions, just reply to this email.</p>
+    `
+  }).catch(e => console.error('Email error (book student, background):', e && e.message ? e.message : e));
+});
+} catch (e) {
     console.error('Book error:', e);
     res.status(500).json({ success:false, message:'Booking failed' });
   }
@@ -588,20 +592,7 @@ app.get('/api/admin/users', requireAdmin, async (req, res) => {
   });
 });
 
-
-    setImmediate(() => {
-      sendEmail({
-        to: email,
-        subject: `Your trial lesson is scheduled (${date} ${time})`,
-        html: `
-          <h2>Your trial lesson is scheduled ✅</h2>
-          <p><strong>Date & Time:</strong> ${date} ${time}${timeZone ? ` (${timeZone})` : ''}</p>
-          <p><strong>Teacher:</strong> ${process.env.TEACHER_NAME || 'Teacher'}</p>
-          <p>If you have questions, just reply to this email.</p>
-        `
-      }).catch(e => console.error('Email error (book student, background):', e && e.message ? e.message : e));
-    });
-    // GET /api/admin/bookings — список бронирований с фильтрами
+// GET /api/admin/bookings — список бронирований с фильтрами
 app.get('/api/admin/bookings', requireAdmin, async (req, res) => {
   const {
     status = '', email = '',
@@ -668,22 +659,22 @@ app.patch('/api/admin/bookings/:id/status', requireAdmin, async (req, res) => {
     `;
     sendEmail({ to: b.email, subject: `Lesson status updated: ${statusText}`, html }).catch(()=>{});
   
-    setImmediate(() => {
-      sendEmail({
-        to: ADMIN_TO,
-        subject: `Lesson status changed: ${statusText}`,
-        html: `
-          <h2>Lesson status changed</h2>
-          <p><strong>Status:</strong> ${statusText}</p>
-          <p><strong>Child:</strong> ${b.childName || '—'}</p>
-          <p><strong>Parent:</strong> ${b.parentName || '—'}</p>
-          <p><strong>Email:</strong> ${b.email || '—'}</p>
-          <p><strong>Date & Time:</strong> ${b.dateStr || '—'} ${b.timeStr || ''}</p>
-          <p><strong>Teacher:</strong> ${b.teacherName || '—'}</p>
-        `
-      }).catch(e => console.error('Email error (status admin, background):', e && e.message ? e.message : e));
-    });
-    }
+  setImmediate(() => {
+  sendEmail({
+    to: ADMIN_TO,
+    subject: `Lesson status changed: ${statusText}`,
+    html: `
+      <h2>Lesson status changed</h2>
+      <p><strong>Status:</strong> ${statusText}</p>
+      <p><strong>Child:</strong> ${b.childName || '—'}</p>
+      <p><strong>Parent:</strong> ${b.parentName || '—'}</p>
+      <p><strong>Email:</strong> ${b.email || '—'}</p>
+      <p><strong>Date & Time:</strong> ${b.dateStr || '—'} ${b.timeStr || ''}</p>
+      <p><strong>Teacher:</strong> ${b.teacherName || '—'}</p>
+    `
+  }).catch(e => console.error('Email error (status admin, background):', e && e.message ? e.message : e));
+});
+}
 
   res.json({ success:true, booking: b });
 });
