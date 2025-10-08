@@ -184,21 +184,29 @@ transporter.verify((error, success) => {
   if (error) {
     console.error('❌ Brevo SMTP connection failed:', error.message);
   } else {
-    console.log('✅ Brevo SMTP server is ready on port 2525');
+    console.log('✅ Brevo SMTP server is ready on port', process.env.SMTP_PORT || 2525);
   }
 });
 
+// === Глобальные параметры отправки ===
 const ADMIN_TO = process.env.ADMIN_BOOKINGS_TO || process.env.NOTIFY_TO || process.env.EMAIL_USER;
+const FROM_EMAIL = process.env.BREVO_FROM || process.env.EMAIL_USER; // подтверждённый отправитель в Brevo
+const REPLY_TO   = process.env.REPLY_TO   || process.env.NOTIFY_TO || process.env.EMAIL_USER;
+
 async function sendEmail(opts) {
   try {
     if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
       console.error('Email credentials missing: EMAIL_USER and EMAIL_PASS required');
       return false;
     }
-    const result = await transporter.sendMail({
-      from: `"Grand English Courses" <${process.env.EMAIL_USER}>`,
+
+    const mailOptions = {
+      from: `"Grand English Courses" <${FROM_EMAIL}>`, // ⚠️ подтверждённый sender
+      replyTo: REPLY_TO,                              // куда придут ответы
       ...opts
-    });
+    };
+
+    await transporter.sendMail(mailOptions);
     console.log('📧 Email sent successfully to:', opts.to);
     return true;
   } catch (e) {
