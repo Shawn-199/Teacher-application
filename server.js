@@ -177,7 +177,6 @@ const transporter = nodemailer.createTransport({
   family: 4            // force IPv4 (avoids some IPv6 timeouts on hosts)
 });
 
-// Test connection on startup
 transporter.verify((error, success) => {
   if (error) {
     console.error('SMTP connection failed:', error && (error.stack || error));
