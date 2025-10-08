@@ -42,6 +42,7 @@ async function webmToMp3(buffer) {
       .inputFormat('webm')
       .noVideo()
       .audioCodec('libmp3lame')
+      // при желании можно добавить .audioBitrate(64).audioFrequency(22050) чтобы вложения были меньше
       .format('mp3')
       .on('error', reject)
       .pipe(output, { end: true });
@@ -163,23 +164,30 @@ try { TimeSlot = mongoose.model('TimeSlot'); } catch (e) {
 }
 
 /* ---------------- Mailer ---------------- */
+// ЯВНЫЙ SMTP для Gmail (host/port/secure) + пул + таймауты
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS }
+  host: 'smtp.gmail.com',
+  port: 465,
+  secure: true, // SSL
+  auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
+  pool: true,
+  maxConnections: 3,
+  maxMessages: 50,
+  connectionTimeout: 15000,
+  socketTimeout: 20000,
 });
+
 const ADMIN_TO = process.env.ADMIN_BOOKINGS_TO || process.env.NOTIFY_TO || process.env.EMAIL_USER;
 
-// Enhanced email function with better error handling
+// Единая функция отправки с корректным From и логами
 async function sendEmail(opts) {
-  try { 
-    const result = await transporter.sendMail({ 
-      from: `"Grand English Courses" <${process.env.EMAIL_USER}>`, 
-      ...opts 
-    });
-    console.log(`✅ Email sent to ${opts.to} with subject: ${opts.subject}`);
-    return result;
-  } catch (e) { 
-    console.error('❌ Email error:', e.message);
+  const fromDefault = `"Grand English Courses" <${process.env.EMAIL_USER}>`;
+  try {
+    const info = await transporter.sendMail({ from: fromDefault, ...opts });
+    console.log('✅ Email sent ok:', info && info.messageId, '| to:', opts && opts.to, '| subject:', opts && opts.subject);
+    return info;
+  } catch (e) {
+    console.error('❌ Email error:', e && e.message ? e.message : e);
     throw e;
   }
 }
