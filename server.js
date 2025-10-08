@@ -162,30 +162,26 @@ try { TimeSlot = mongoose.model('TimeSlot'); } catch (e) {
 }
 
 /* ---------------- Mailer ---------------- */
-
 const transporter = nodemailer.createTransport({
   host: 'smtp.gmail.com',
-  port: 465,            // SSL
+  port: 465,
   secure: true,
   auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
   pool: true,
   maxConnections: 1,
   maxMessages: 50,
-  connectionTimeout: 15000, // 15s
+  connectionTimeout: 15000,
   greetingTimeout: 10000,
   socketTimeout: 20000,
-  family: 4            // force IPv4 (avoids some IPv6 timeouts on hosts)
+  family: 4
 });
 
+// Test connection on startup
 transporter.verify((error, success) => {
   if (error) {
     console.error('SMTP connection failed:', error && (error.stack || error));
   } else {
     console.log('SMTP server is ready to take messages via smtp.gmail.com:465');
-  }
-});
-  } else {
-    console.log('SMTP server is ready to take messages');
   }
 });
 
@@ -196,13 +192,13 @@ async function sendEmail(opts) {
       console.error('Email credentials missing: EMAIL_USER and EMAIL_PASS required');
       return false;
     }
-    const result = await transporter.sendMail({ 
-      from: `"Grand English Courses" <${process.env.EMAIL_USER}>`, 
-      ...opts 
+    const result = await transporter.sendMail({
+      from: `"Grand English Courses" <${process.env.EMAIL_USER}>`,
+      ...opts
     });
     console.log('Email sent successfully to:', opts.to);
     return true;
-  } catch (e) { 
+  } catch (e) {
     console.error('Email send failed:', e.message);
     return false;
   }
