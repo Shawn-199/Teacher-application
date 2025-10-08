@@ -166,21 +166,33 @@ const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS }
 });
-const ADMIN_TO = process.env.ADMIN_BOOKINGS_TO || process.env.NOTIFY_TO || process.env.EMAIL_USER;
 
-// Verify SMTP on startup (non-blocking)
-(async () => {
-  try {
-    await transporter.verify();
-    console.log('[MAIL] SMTP verified for', process.env.EMAIL_USER);
-  } catch (e) {
-    console.error('[MAIL] SMTP verify failed:', e.message);
+// Test connection on startup
+transporter.verify(function(error, success) {
+  if (error) {
+    console.error('SMTP connection failed:', error);
+  } else {
+    console.log('SMTP server is ready to take messages');
   }
-})();
+});
+
+const ADMIN_TO = process.env.ADMIN_BOOKINGS_TO || process.env.NOTIFY_TO || process.env.EMAIL_USER;
 async function sendEmail(opts) {
-  const info = await transporter.sendMail({ from: `"Grand English Courses" <${process.env.EMAIL_USER}>`, ...opts });
-  console.log('[MAIL] sent:', info.messageId, 'to:', opts.to);
-  return info;
+  try {
+    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+      console.error('Email credentials missing: EMAIL_USER and EMAIL_PASS required');
+      return false;
+    }
+    const result = await transporter.sendMail({ 
+      from: `"Grand English Courses" <${process.env.EMAIL_USER}>`, 
+      ...opts 
+    });
+    console.log('Email sent successfully to:', opts.to);
+    return true;
+  } catch (e) { 
+    console.error('Email send failed:', e.message);
+    return false;
+  }
 }
 
 /* ---------------- JWT ---------------- */
@@ -246,6 +258,12 @@ const upload = multer({
 });
 app.post('/submit', upload.any(), async (req, res) => {
   try {
+    // Check email configuration first
+    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+      console.error('Email configuration missing - cannot send teacher application');
+      return res.status(500).json({ success:false, message:'Email service not configured' });
+    }
+    
     const files = {};
     for (const f of (req.files || [])) files[f.fieldname] = f;
 
@@ -322,17 +340,6 @@ app.post('/submit', upload.any(), async (req, res) => {
       `,
       attachments
     });
-    // Acknowledgement to applicant
-    await sendEmail({
-      to: email,
-      subject: `We received your application – Grand English Courses`,
-      html: `
-        <h2>Thanks for applying!</h2>
-        <p>Hi ${fullname || 'Candidate'}, we received your application and attachments.</p>
-        <p>We’ll review your CV and audio answers and get back to you.</p>
-      `
-    });
-
 
     res.status(201).json({ success:true, message:'Application submitted and email sent' });
   } catch (err) {
@@ -430,30 +437,7 @@ app.post('/api/bookings/trial', optionalAuth, async (req, res) => {
       teacherName: process.env.TEACHER_NAME || 'Teacher'
     });
 
-    
-    // Emails: admin and student
-    await sendEmail({
-      to: ADMIN_TO,
-      subject: `🗓️ New TRIAL booking: ${booking.childName || childName || 'Student'} (${date} ${time})`,
-      html: `
-        <h2>New trial booking</h2>
-        <p><strong>Email:</strong> ${booking.email}</p>
-        <p><strong>Child:</strong> ${booking.childName || '—'}</p>
-        <p><strong>Parent:</strong> ${booking.parentName || '—'}</p>
-        <p><strong>Level:</strong> ${level || booking.level}</p>
-        <p><strong>Date & Time:</strong> ${date} ${time} (${timeZone||booking.timeZone||'—'})</p>
-      `
-    });
-    await sendEmail({
-      to: booking.email,
-      subject: `Your trial is booked: ${date} ${time}`,
-      html: `
-        <h2>Trial booked ✅</h2>
-        <p>See you on ${date} at ${time} (${timeZone||'your time'})</p>
-        <p>If you need to reschedule, reply to this email at least 5 hours in advance.</p>
-      `
-    });
-res.json({ success:true, booking });
+    res.json({ success:true, booking });
   } catch (e) {
     console.error('Trial booking error:', e);
     res.status(500).json({ success:false, message:'Booking failed' });
@@ -475,36 +459,10 @@ app.post('/api/book', auth, async (req, res) => {
       teacherName: process.env.TEACHER_NAME || 'Teacher'
     });
 
-    // Confirmation to student
-    await sendEmail({
-      to: email,
-      subject: `Your lesson is booked: ${date} ${time}`,
-      html: `
-        <h2>Booking confirmed ✅</h2>
-        <p><strong>Child:</strong> ${childName}</p>
-        <p><strong>Date & Time:</strong> ${date} ${time} (${timeZone||'—'})</p>
-        <p><strong>Level:</strong> ${level}</p>
-        <p>If you need to reschedule (≥5 hours before), just reply to this email.</p>
-      `
-    });
-    // Confirmation to student
-    await sendEmail({
-      to: email,
-      subject: `Your lesson is booked: ${date} ${time}`,
-      html: `
-        <h2>Booking confirmed ✅</h2>
-        <p><strong>Child:</strong> ${childName}</p>
-        <p><strong>Date & Time:</strong> ${date} ${time} (${timeZone||'—'})</p>
-        <p><strong>Level:</strong> ${level}</p>
-        <p>If you need to reschedule (≥5 hours before), just reply to this email.</p>
-      `
-    });
-
-
-
+    // Send to admin
     await sendEmail({
       to: ADMIN_TO,
-      subject: `🗓️ New booking: ${childName} (${date} ${time})`,
+      subject: `🗓️ New trial booking: ${childName} (${date} ${time})`,
       html: `
         <h2>New booking</h2>
         <p><strong>Child:</strong> ${childName}</p>
@@ -513,6 +471,22 @@ app.post('/api/book', auth, async (req, res) => {
         <p><strong>Level:</strong> ${level}</p>
         <p><strong>Date & Time:</strong> ${date} ${time} (${timeZone||'—'})</p>
         <p><strong>Country:</strong> ${country||'—'}</p>
+      `
+    });
+
+    // Send confirmation to student
+    await sendEmail({
+      to: email,
+      subject: `Your Trial Lesson Confirmation - ${date} at ${time}`,
+      html: `
+        <h2>Lesson Booked Successfully!</h2>
+        <p>Dear ${parentName},</p>
+        <p>Your trial lesson for <strong>${childName}</strong> has been scheduled.</p>
+        <p><strong>Date:</strong> ${date}</p>
+        <p><strong>Time:</strong> ${time} (${timeZone||''})</p>
+        <p><strong>Level:</strong> ${level}</p>
+        <p><strong>Teacher:</strong> ${process.env.TEACHER_NAME || 'Teacher'}</p>
+        <p>We look forward to seeing you!</p>
       `
     });
 
@@ -655,7 +629,7 @@ app.get('/api/admin/bookings', requireAdmin, async (req, res) => {
 // PATCH /api/admin/bookings/:id/status — смена статуса/даты/времени/уровня/преподавателя
 app.patch('/api/admin/bookings/:id/status', requireAdmin, async (req, res) => {
   const { id } = req.params;
-  const { status, dateStr, timeStr, level, teacherName, notifyEmail } = req.body || {};
+  const { status, dateStr, timeStr, level, teacherName } = req.body || {};
 
   const b = await Booking.findById(id);
   if (!b) return res.status(404).json({ success:false, message:'Booking not found' });
@@ -673,17 +647,19 @@ app.patch('/api/admin/bookings/:id/status', requireAdmin, async (req, res) => {
 
   await b.save();
 
-  // (опционально) письмо родителю/студенту
-  if (notifyEmail && b.email) {
+  // Always notify student when status changes
+  if (b.email) {
     const statusText = b.status;
     const html = `
-      <h2>Update for your lesson</h2>
+      <h2>Lesson Status Updated</h2>
+      <p>Dear ${b.parentName},</p>
+      <p>The status of <strong>${b.childName}'s</strong> lesson has been updated:</p>
       <p><strong>Status:</strong> ${statusText}</p>
       <p><strong>Date & Time:</strong> ${b.dateStr || '—'} ${b.timeStr || ''}</p>
       <p><strong>Teacher:</strong> ${b.teacherName || '—'}</p>
-      <p>If you have questions, just reply to this email.</p>
+      <p>If you have questions, please reply to this email.</p>
     `;
-    sendEmail({ to: b.email, subject: `Lesson status updated: ${statusText}`, html }).catch(()=>{});
+    sendEmail({ to: b.email, subject: `Lesson Status Updated: ${statusText}`, html }).catch(()=>{});
   }
 
   res.json({ success:true, booking: b });
