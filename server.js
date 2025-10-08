@@ -162,15 +162,29 @@ try { TimeSlot = mongoose.model('TimeSlot'); } catch (e) {
 }
 
 /* ---------------- Mailer ---------------- */
+
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS }
+  host: 'smtp.gmail.com',
+  port: 465,            // SSL
+  secure: true,
+  auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
+  pool: true,
+  maxConnections: 1,
+  maxMessages: 50,
+  connectionTimeout: 15000, // 15s
+  greetingTimeout: 10000,
+  socketTimeout: 20000,
+  family: 4            // force IPv4 (avoids some IPv6 timeouts on hosts)
 });
 
-// Test connection on startup
+// Test connection on startup with verbose logging
 transporter.verify(function(error, success) {
   if (error) {
-    console.error('SMTP connection failed:', error);
+    console.error('SMTP connection failed:', error && (error.stack || error));
+  } else {
+    console.log('SMTP server is ready to take messages via smtp.gmail.com:465');
+  }
+});
   } else {
     console.log('SMTP server is ready to take messages');
   }
@@ -553,6 +567,23 @@ app.post('/api/bookings/:id/reschedule', auth, async (req, res) => {
 });
 
 /* ---------------- Admin APIs ---------------- */
+
+// Quick SMTP test endpoint (send to ADMIN_TO)
+app.post('/api/admin/test-email', requireAdmin, async (req, res) => {
+  try {
+    const ok = await sendEmail({
+      to: ADMIN_TO,
+      subject: 'SMTP test ✔',
+      html: '<p>If you see this, SMTP works from Render.</p>'
+    });
+    if (!ok) return res.status(500).json({ success:false, message:'Send failed' });
+    res.json({ success:true });
+  } catch (e) {
+    console.error('test-email failed:', e);
+    res.status(500).json({ success:false, message:String(e) });
+  }
+});
+
 
 // GET /api/admin/users — список пользователей с датой регистрации
 app.get('/api/admin/users', requireAdmin, async (req, res) => {
