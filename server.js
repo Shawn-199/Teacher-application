@@ -184,29 +184,25 @@ transporter.verify((error, success) => {
   if (error) {
     console.error('❌ Brevo SMTP connection failed:', error.message);
   } else {
-    console.log('✅ Brevo SMTP server is ready on port', process.env.SMTP_PORT || 2525);
+    console.log('✅ Brevo SMTP server is ready on port 2525');
   }
 });
 
-// === Глобальные параметры отправки ===
 const ADMIN_TO = process.env.ADMIN_BOOKINGS_TO || process.env.NOTIFY_TO || process.env.EMAIL_USER;
-const FROM_EMAIL = process.env.BREVO_FROM || process.env.EMAIL_USER; // подтверждённый отправитель в Brevo
-const REPLY_TO   = process.env.REPLY_TO   || process.env.NOTIFY_TO || process.env.EMAIL_USER;
 
+
+const FROM_EMAIL = process.env.BREVO_FROM || process.env.EMAIL_USER;
+const REPLY_TO   = process.env.REPLY_TO   || process.env.NOTIFY_TO || process.env.EMAIL_USER;
 async function sendEmail(opts) {
   try {
     if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
       console.error('Email credentials missing: EMAIL_USER and EMAIL_PASS required');
       return false;
     }
-
-    const mailOptions = {
-      from: `"Grand English Courses" <${FROM_EMAIL}>`, // ⚠️ подтверждённый sender
-      replyTo: REPLY_TO,                              // куда придут ответы
+    const result = await transporter.sendMail({
+      from: `"Grand English Courses" <${process.env.EMAIL_USER}>`,
       ...opts
-    };
-
-    await transporter.sendMail(mailOptions);
+    });
     console.log('📧 Email sent successfully to:', opts.to);
     return true;
   } catch (e) {
@@ -950,3 +946,49 @@ app.post('/api/admin/slots/import', requireAdmin, uploadAny, async (req, res) =>
 const PORT = process.env.PORT || 5000;
 const HOST = process.env.HOST || '0.0.0.0';
 app.listen(PORT, HOST, () => console.log(`Server is running on port ${PORT}`));
+
+/* ---------------- Student Email Template Helpers ---------------- */
+const LOGO_URL = process.env.LOGO_URL || 'https://grandenglishcourses.com/logo.png';
+const STUDENT_PORTAL_URL = process.env.STUDENT_PORTAL_URL || (process.env.APP_BASE_URL ? process.env.APP_BASE_URL + '/dashboard' : 'https://grandenglishcourses.com/dashboard');
+
+function renderStudentEmail({ title, bodyHtml, primaryCtaLabel = 'Open Dashboard', primaryCtaHref = STUDENT_PORTAL_URL, secondaryCtaLabel = '', secondaryCtaHref = '' }) {
+  const buttonPrimary = primaryCtaHref ? `
+    <a href="${primaryCtaHref}" style="display:inline-block;padding:12px 18px;border-radius:10px;text-decoration:none;font-weight:600;background:#2563eb;color:#fff;">${primaryCtaLabel}</a>
+  ` : '';
+  const buttonSecondary = secondaryCtaHref ? `
+    <a href="${secondaryCtaHref}" style="display:inline-block;margin-left:12px;padding:12px 18px;border-radius:10px;text-decoration:none;font-weight:600;background:#111827;color:#fff;">${secondaryCtaLabel}</a>
+  ` : '';
+
+  return `
+  <div style="background:#f3f4f6;padding:32px 12px;">
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="max-width:640px;width:100%;background:#ffffff;border-radius:14px;box-shadow:0 4px 12px rgba(0,0,0,0.06);">
+      <tr>
+        <td style="padding:28px 24px 8px;text-align:center;">
+          <img src="${LOGO_URL}" alt="Grand English Courses" style="height:60px;max-width:160px;display:block;margin:0 auto 6px;" />
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:0 24px 8px;text-align:center;">
+          <h1 style="margin:0;font-size:22px;line-height:1.3;color:#111827;font-weight:800;">${title}</h1>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:8px 24px 12px;color:#374151;font-size:14px;line-height:1.6;">
+          ${bodyHtml}
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:4px 24px 28px;text-align:center;">
+          ${buttonPrimary}${buttonSecondary}
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:16px 24px 28px;color:#6b7280;font-size:12px;line-height:1.5;text-align:center;border-top:1px solid #e5e7eb;">
+          <div>Need help? Just reply to this email.</div>
+          <div style="margin-top:6px;">© ${new Date().getFullYear()} Grand English Courses</div>
+        </td>
+      </tr>
+    </table>
+  </div>
+  `;
+}
