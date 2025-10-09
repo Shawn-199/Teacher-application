@@ -193,6 +193,7 @@ const ADMIN_TO = process.env.ADMIN_BOOKINGS_TO || process.env.NOTIFY_TO || proce
 
 const FROM_EMAIL = process.env.BREVO_FROM || process.env.EMAIL_USER;
 const REPLY_TO   = process.env.REPLY_TO   || process.env.NOTIFY_TO || process.env.EMAIL_USER;
+
 async function sendEmail(opts) {
   try {
     if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
@@ -200,7 +201,8 @@ async function sendEmail(opts) {
       return false;
     }
     const result = await transporter.sendMail({
-      from: `"Grand English Courses" <${process.env.EMAIL_USER}>`,
+      from: `"Grand English Courses" <${FROM_EMAIL}>`,  // ✅ подтверждённый отправитель
+      replyTo: REPLY_TO,                                 // ✅ ответы придут на Gmail
       ...opts
     });
     console.log('📧 Email sent successfully to:', opts.to);
