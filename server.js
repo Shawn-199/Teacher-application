@@ -944,12 +944,20 @@ app.post('/api/admin/slots/import', requireAdmin, uploadAny, async (req, res) =>
   }
 });
 
-/* ---------------- REVIEWS SYSTEM (ADD THIS TO SERVER.JS) ---------------- */
+/* ---------------- REVIEWS SYSTEM (UPDATED) ---------------- */
 
-// 1. Schema for Reviews
+// 1. Schema for Reviews (ИСПРАВЛЕНО: Добавлены недостающие поля)
 const ReviewSchema = new Schema({
   name: { type: String, required: true },
-  email: { type: String, required: true }, // Used for verification
+  email: { type: String, required: true },
+  
+  // --- НОВЫЕ ПОЛЯ ---
+  country: { type: String, default: '' },
+  role: { type: String, default: 'Parent' },
+  child: { type: String, default: '' },
+  age: { type: Number },
+  // ------------------
+
   verificationCode: String,
   isVerified: { type: Boolean, default: false },
   ratings: {
@@ -958,27 +966,26 @@ const ReviewSchema = new Schema({
     platform: Number
   },
   text: String,
-  status: { type: String, default: 'Draft' }, // Draft (waiting code) -> Pending (waiting admin) -> Approved
+  status: { type: String, default: 'Draft' }, 
 }, { timestamps: true });
 
 const Review = model('Review', ReviewSchema);
 
-// 2. Public API: Get Approved Reviews
+// 2. Public API: Get Approved Reviews (ИСПРАВЛЕНО: Возвращаем новые поля)
 app.get('/api/reviews/list', async (req, res) => {
   try {
-    // Return only Approved reviews, sorted new to old
     const reviews = await Review.find({ status: 'Approved' })
-      .select('name ratings text createdAt')
+      // Добавили country, role, child, age в выборку
+      .select('name ratings text createdAt country role child age') 
       .sort({ createdAt: -1 })
       .limit(50);
     
-    // Calculate stats
+    // Stats calc
     const allApproved = await Review.find({ status: 'Approved' });
     const count = allApproved.length;
     let avg = 0;
     if (count > 0) {
       const sum = allApproved.reduce((acc, r) => {
-        // Average of 3 criteria per review
         const reviewAvg = (r.ratings.course + r.ratings.teacher + r.ratings.platform) / 3;
         return acc + reviewAvg;
       }, 0);
@@ -991,17 +998,14 @@ app.get('/api/reviews/list', async (req, res) => {
   }
 });
 
-// 3. Public API: Request Verification Code (Step 1)
+// 3. Public API: Request Verification Code
 app.post('/api/reviews/otp', async (req, res) => {
   try {
     const { name, email } = req.body;
     if (!email) return res.status(400).json({ success: false, message: 'Email required' });
 
-    // Generate 4-digit code
     const code = Math.floor(1000 + Math.random() * 9000).toString();
 
-    // Upsert: if user started a review but didn't finish, update it. If new, create.
-    // We look for a recent 'Draft' or 'Pending' review from this email to avoid duplicates
     let review = await Review.findOne({ email, status: 'Draft' });
     
     if (!review) {
@@ -1013,11 +1017,10 @@ app.post('/api/reviews/otp', async (req, res) => {
       });
     } else {
       review.verificationCode = code;
-      review.name = name; // update name just in case
+      review.name = name;
       await review.save();
     }
 
-    // Send Email using your existing sendEmail function
     await sendEmail({
       to: email,
       subject: `Your Verification Code: ${code}`,
@@ -1026,7 +1029,6 @@ app.post('/api/reviews/otp', async (req, res) => {
         <p>Hello ${name},</p>
         <p>Use this code to verify your email and post your review:</p>
         <h1 style="color:#2563EB;">${code}</h1>
-        <p>If you did not request this, please ignore this email.</p>
       `
     });
 
@@ -1037,53 +1039,59 @@ app.post('/api/reviews/otp', async (req, res) => {
   }
 });
 
-// 4. Public API: Verify & Submit (Step 2)
+// 4. Public API: Verify & Submit (ИСПРАВЛЕНО: Сохраняем новые поля)
 app.post('/api/reviews/submit', async (req, res) => {
   try {
-    const { email, code, ratings, text } = req.body;
+    // Получаем новые поля из запроса
+    const { email, code, ratings, text, country, role, child, age, name } = req.body;
     
-    // Find the draft review
     const review = await Review.findOne({ email, verificationCode: code, status: 'Draft' });
     
     if (!review) {
       return res.status(400).json({ success: false, message: 'Invalid code or email' });
     }
 
-    // Update details
+    // Сохраняем ВСЕ данные
     review.isVerified = true;
-    review.status = 'Pending'; // Send to Admin for moderation
+    review.status = 'Pending';
     review.ratings = ratings;
     review.text = text;
-    review.verificationCode = undefined; // Clear code for security
+    
+    if (name) review.name = name;
+    if (country) review.country = country;
+    if (role) review.role = role;
+    if (child) review.child = child;
+    if (age) review.age = age;
+
+    review.verificationCode = undefined;
     await review.save();
 
-    // Notify Admin (You)
     await sendEmail({
       to: process.env.ADMIN_BOOKINGS_TO || process.env.EMAIL_USER,
       subject: '📝 New Review Waiting for Approval',
       html: `
-        <h2>New Review from ${review.name}</h2>
+        <h2>New Review from ${review.name} (${review.country})</h2>
+        <p><strong>Role:</strong> ${review.role} of ${review.child} (${review.age}yo)</p>
         <p><strong>Text:</strong> ${text}</p>
-        <p><strong>Ratings:</strong> Course: ${ratings.course}, Teacher: ${ratings.teacher}, Platform: ${ratings.platform}</p>
         <p>Go to Admin Panel to approve.</p>
       `
     });
 
     res.json({ success: true, message: 'Review submitted for moderation' });
   } catch (e) {
+    console.error(e);
     res.status(500).json({ success: false, message: 'Error submitting review' });
   }
 });
 
 // 5. Admin API: Manage Reviews
 app.get('/api/admin/reviews', requireAdmin, async (req, res) => {
-  // Get all reviews except Drafts
   const reviews = await Review.find({ status: { $ne: 'Draft' } }).sort({ createdAt: -1 });
   res.json({ success: true, reviews });
 });
 
 app.patch('/api/admin/reviews/:id', requireAdmin, async (req, res) => {
-  const { status } = req.body; // 'Approved' or 'Rejected'
+  const { status } = req.body; 
   await Review.findByIdAndUpdate(req.params.id, { status });
   res.json({ success: true });
 });
