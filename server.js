@@ -651,7 +651,7 @@ app.post('/api/bookings/:id/reschedule', auth, async (req, res) => {
         <p>The lesson for <strong>${b.childName}</strong> has been moved to:</p>
         <p><strong>Date:</strong> ${b.dateStr}</p>
         <p><strong>Time:</strong> ${b.timeStr} (${b.timeZone})</p>
-        <p>If this was a mistake, please contact us.</p>
+        <p>If this was a mistake, please contact us at grand.english.courses@gmail.com </p>
       `
     });
 
