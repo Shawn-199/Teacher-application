@@ -127,6 +127,7 @@ const User = model('User', UserSchema);
 const BookingSchema = new Schema({
   user: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   email: { type: String, required: true },
+  phone: { type: String }, // <--- ИСПРАВЛЕНО: Добавлено поле телефона
   childName: { type: String, required: true },
   parentName: { type: String, required: true },
   childAge: { type: Number },
@@ -416,10 +417,11 @@ app.get('/api/me', optionalAuth, async (req, res) => {
 
 /* ---------------- Bookings (student) ---------------- */
 
-// TRIAL booking — работает и с JWT, и без (гость)
+// TRIAL booking — ИСПРАВЛЕНО: Добавлены уведомления и сохранение телефона
 app.post('/api/bookings/trial', optionalAuth, async (req, res) => {
   try {
-    const { date, time, level } = req.body || {};
+    // Получаем phone из запроса
+    const { date, time, level, phone, childName, parentName, childAge, country, timeZone } = req.body || {};
     if (!date || !time) return res.status(400).json({ success:false, message:'date and time are required' });
 
     let userDoc = null;
@@ -427,7 +429,7 @@ app.post('/api/bookings/trial', optionalAuth, async (req, res) => {
       userDoc = await User.findById(req.user.uid);
       if (!userDoc) return res.status(401).json({ success:false, message:'Auth user not found' });
     } else {
-      // гость — достаём email из разных полей/заголовков
+      // гость
       const candidates = [
         req.body.email, req.body.userEmail, req.body.contactEmail,
         req.body.login, req.body.username, req.headers['x-user-email']
@@ -440,20 +442,59 @@ app.post('/api/bookings/trial', optionalAuth, async (req, res) => {
       });
     }
 
+    // Создаем запись
     const booking = await Booking.create({
       user: userDoc._id,
       email: userDoc.email,
-      childName: 'Trial Student',
-      parentName: (userDoc.firstName || 'Parent') + (userDoc.lastName ? ' ' + userDoc.lastName : ''),
-      childAge: null,
-      country: '',
-      timeZone: '',
+      phone: phone || '', // Сохраняем телефон
+      childName: childName || 'Trial Student',
+      parentName: parentName || (userDoc.firstName || 'Parent') + (userDoc.lastName ? ' ' + userDoc.lastName : ''),
+      childAge: childAge || null,
+      country: country || '',
+      timeZone: timeZone || '',
       dateStr: date,
       timeStr: time,
       level: level || 'Beginner',
       status: 'Scheduled',
       teacherName: process.env.TEACHER_NAME || 'Teacher'
     });
+
+    // --- ОТПРАВКА ПИСЕМ (ДОБАВЛЕНО) ---
+
+    // 1. Админу
+    await sendEmail({
+      to: ADMIN_TO,
+      subject: `🗓️ New trial booking: ${booking.childName} (${date} ${time})`,
+      html: `
+        <h2>New Booking (Trial)</h2>
+        <p><strong>Parent:</strong> ${booking.parentName}</p>
+        <p><strong>Child:</strong> ${booking.childName} (${booking.childAge || '-'} y.o.)</p>
+        <p><strong>Phone:</strong> ${booking.phone || 'Not provided'}</p>
+        <p><strong>Email:</strong> ${booking.email}</p>
+        <p><strong>Level:</strong> ${booking.level}</p>
+        <p><strong>Date & Time:</strong> ${date} ${time}</p>
+        <p><strong>Country:</strong> ${booking.country || '-'}</p>
+        <p><strong>Timezone:</strong> ${booking.timeZone || '-'}</p>
+      `
+    });
+
+    // 2. Студенту (если email не фейковый гостевой)
+    if (booking.email && !booking.email.includes('guest.local')) {
+      await sendEmail({
+        to: booking.email,
+        subject: `Your Trial Lesson Confirmation - ${date} at ${time}`,
+        html: `
+          <h2>Lesson Booked Successfully!</h2>
+          <p>Dear ${booking.parentName},</p>
+          <p>Your trial lesson for <strong>${booking.childName}</strong> has been scheduled.</p>
+          <p><strong>Date:</strong> ${date}</p>
+          <p><strong>Time:</strong> ${time} (${booking.timeZone||''})</p>
+          <p><strong>Level:</strong> ${level}</p>
+          <p><strong>Teacher:</strong> ${process.env.TEACHER_NAME || 'Teacher'}</p>
+          <p>We look forward to seeing you!</p>
+        `
+      });
+    }
 
     res.json({ success:true, booking });
   } catch (e) {
@@ -464,7 +505,7 @@ app.post('/api/bookings/trial', optionalAuth, async (req, res) => {
 
 app.post('/api/book', auth, async (req, res) => {
   try {
-    const { email, childName, parentName, childAge, country, timeZone, date, time, level } = req.body;
+    const { email, childName, parentName, childAge, country, timeZone, date, time, level, phone } = req.body;
     if (!date || !time || !childName || !parentName || !email || !level) {
       return res.status(400).json({ success:false, message:'Missing required fields' });
     }
@@ -472,6 +513,7 @@ app.post('/api/book', auth, async (req, res) => {
     const booking = await Booking.create({
       user: req.user.uid,
       email, childName, parentName, childAge, country, timeZone,
+      phone: phone || '', // Сохраняем телефон если передан
       dateStr: date, timeStr: time, level,
       status: 'Scheduled',
       teacherName: process.env.TEACHER_NAME || 'Teacher'
@@ -485,6 +527,7 @@ app.post('/api/book', auth, async (req, res) => {
         <h2>New booking</h2>
         <p><strong>Child:</strong> ${childName}</p>
         <p><strong>Parent:</strong> ${parentName}</p>
+        <p><strong>Phone:</strong> ${phone || 'Not provided'}</p>
         <p><strong>Email:</strong> ${email}</p>
         <p><strong>Level:</strong> ${level}</p>
         <p><strong>Date & Time:</strong> ${date} ${time} (${timeZone||'—'})</p>
@@ -545,6 +588,19 @@ app.post('/api/bookings/:id/cancel', auth, async (req, res) => {
     if (!b) return res.status(404).json({ success:false, message:'Not found' });
     b.status = 'Cancelled';
     await b.save();
+    
+    // Send email to admin about cancellation
+    await sendEmail({
+      to: ADMIN_TO,
+      subject: `❌ Booking Cancelled: ${b.childName}`,
+      html: `
+        <h2>Booking Cancelled</h2>
+        <p><strong>Student:</strong> ${b.childName}</p>
+        <p><strong>Parent:</strong> ${b.parentName}</p>
+        <p><strong>Date:</strong> ${b.dateStr} ${b.timeStr}</p>
+      `
+    });
+
     res.json({ success:true, booking: b });
   } catch (e) {
     console.error('Cancel error:', e);
@@ -552,17 +608,53 @@ app.post('/api/bookings/:id/cancel', auth, async (req, res) => {
   }
 });
 
+// RESCHEDULE — ИСПРАВЛЕНО: Добавлены уведомления
 app.post('/api/bookings/:id/reschedule', auth, async (req, res) => {
   try {
     const { id } = req.params;
     const { date, time, level } = req.body;
     const b = await Booking.findOne({ _id: id, user: req.user.uid });
     if (!b) return res.status(404).json({ success:false, message:'Not found' });
+    
+    const oldDate = b.dateStr;
+    const oldTime = b.timeStr;
+
     if (date) b.dateStr = date;
     if (time) b.timeStr = time;
     if (level) b.level = level;
-    b.status = 'Scheduled';
+    b.status = 'Rescheduled'; // Обновляем статус
     await b.save();
+
+    // --- ОТПРАВКА УВЕДОМЛЕНИЙ ---
+
+    // 1. Админу
+    await sendEmail({
+      to: ADMIN_TO,
+      subject: `🔄 Lesson Rescheduled: ${b.childName}`,
+      html: `
+        <h2>Lesson Rescheduled</h2>
+        <p><strong>Student:</strong> ${b.childName} (${b.parentName})</p>
+        <p><strong>Phone:</strong> ${b.phone || 'N/A'}</p>
+        <p><strong>New Time:</strong> ${b.dateStr} at ${b.timeStr}</p>
+        <p><strong>Previous Time:</strong> ${oldDate} at ${oldTime}</p>
+        <p><strong>Country:</strong> ${b.country || '-'}</p>
+      `
+    });
+
+    // 2. Студенту
+    await sendEmail({
+      to: b.email,
+      subject: `Lesson Rescheduled - ${b.dateStr}`,
+      html: `
+        <h2>Your lesson has been rescheduled</h2>
+        <p>Dear ${b.parentName},</p>
+        <p>The lesson for <strong>${b.childName}</strong> has been moved to:</p>
+        <p><strong>Date:</strong> ${b.dateStr}</p>
+        <p><strong>Time:</strong> ${b.timeStr} (${b.timeZone})</p>
+        <p>If this was a mistake, please contact us.</p>
+      `
+    });
+
     res.json({ success:true, booking: b });
   } catch (e) {
     console.error('Reschedule error:', e);
@@ -946,7 +1038,7 @@ app.post('/api/admin/slots/import', requireAdmin, uploadAny, async (req, res) =>
 
 /* ---------------- REVIEWS SYSTEM (UPDATED) ---------------- */
 
-// 1. Schema for Reviews (ИСПРАВЛЕНО: Добавлены недостающие поля)
+// 1. Schema for Reviews
 const ReviewSchema = new Schema({
   name: { type: String, required: true },
   email: { type: String, required: true },
@@ -971,7 +1063,7 @@ const ReviewSchema = new Schema({
 
 const Review = model('Review', ReviewSchema);
 
-// 2. Public API: Get Approved Reviews (ИСПРАВЛЕНО: Возвращаем новые поля)
+// 2. Public API: Get Approved Reviews
 app.get('/api/reviews/list', async (req, res) => {
   try {
     const reviews = await Review.find({ status: 'Approved' })
@@ -1039,7 +1131,7 @@ app.post('/api/reviews/otp', async (req, res) => {
   }
 });
 
-// 4. Public API: Verify & Submit (ИСПРАВЛЕНО: Сохраняем новые поля)
+// 4. Public API: Verify & Submit
 app.post('/api/reviews/submit', async (req, res) => {
   try {
     // Получаем новые поля из запроса
