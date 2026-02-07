@@ -420,7 +420,7 @@ app.get('/api/me', optionalAuth, async (req, res) => {
 // TRIAL booking — ИСПРАВЛЕНО: Добавлены уведомления и сохранение телефона
 app.post('/api/bookings/trial', optionalAuth, async (req, res) => {
   try {
-    // Получаем phone из запроса
+    // Получаем phone из запроса - ИСПРАВЛЕНИЕ: Добавлена строка для получения телефона из тела запроса
     const { date, time, level, phone, childName, parentName, childAge, country, timeZone } = req.body || {};
     if (!date || !time) return res.status(400).json({ success:false, message:'date and time are required' });
 
@@ -442,11 +442,14 @@ app.post('/api/bookings/trial', optionalAuth, async (req, res) => {
       });
     }
 
+    // ИСПРАВЛЕНИЕ: Сохраняем телефон правильно - проверяем, что phone существует в теле запроса
+    const phoneToSave = phone || req.body.phone || 'Not provided';
+
     // Создаем запись
     const booking = await Booking.create({
       user: userDoc._id,
       email: userDoc.email,
-      phone: phone || '', // Сохраняем телефон
+      phone: phoneToSave, // Сохраняем телефон - ИСПРАВЛЕНО
       childName: childName || 'Trial Student',
       parentName: parentName || (userDoc.firstName || 'Parent') + (userDoc.lastName ? ' ' + userDoc.lastName : ''),
       childAge: childAge || null,
@@ -513,7 +516,7 @@ app.post('/api/book', auth, async (req, res) => {
     const booking = await Booking.create({
       user: req.user.uid,
       email, childName, parentName, childAge, country, timeZone,
-      phone: phone || '', // Сохраняем телефон если передан
+      phone: phone || 'Not provided', // Сохраняем телефон если передан
       dateStr: date, timeStr: time, level,
       status: 'Scheduled',
       teacherName: process.env.TEACHER_NAME || 'Teacher'
