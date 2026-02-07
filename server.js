@@ -127,7 +127,7 @@ const User = model('User', UserSchema);
 const BookingSchema = new Schema({
   user: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   email: { type: String, required: true },
-  phone: { type: String }, // <--- ИСПРАВЛЕНО: Добавлено поле телефона
+  phone: { type: String, default: 'Not provided' }, // ДОБАВЬ ЭТУ СТРОКУ
   childName: { type: String, required: true },
   parentName: { type: String, required: true },
   childAge: { type: Number },
@@ -469,7 +469,7 @@ app.post('/api/bookings/trial', optionalAuth, async (req, res) => {
         <h2>New Booking (Trial)</h2>
         <p><strong>Parent:</strong> ${booking.parentName}</p>
         <p><strong>Child:</strong> ${booking.childName} (${booking.childAge || '-'} y.o.)</p>
-        <p><strong>Phone:</strong> ${booking.phone || 'Not provided'}</p>
+        <p><strong>Phone:</strong> ${booking.phone}</p>
         <p><strong>Email:</strong> ${booking.email}</p>
         <p><strong>Level:</strong> ${booking.level}</p>
         <p><strong>Date & Time:</strong> ${date} ${time}</p>
@@ -482,7 +482,7 @@ app.post('/api/bookings/trial', optionalAuth, async (req, res) => {
     if (booking.email && !booking.email.includes('guest.local')) {
       await sendEmail({
         to: booking.email,
-        subject: `Your Trial Lesson Confirmation - ${date} at ${time}`,
+        subject: `🗓️ Your Trial Lesson Confirmation - ${date} at ${time}`,
         html: `
           <h2>Lesson Booked Successfully!</h2>
           <p>Dear ${booking.parentName},</p>
@@ -490,8 +490,8 @@ app.post('/api/bookings/trial', optionalAuth, async (req, res) => {
           <p><strong>Date:</strong> ${date}</p>
           <p><strong>Time:</strong> ${time} (${booking.timeZone||''})</p>
           <p><strong>Level:</strong> ${level}</p>
-          <p><strong>Teacher:</strong> ${process.env.TEACHER_NAME || 'Teacher'}</p>
-          <p>We look forward to seeing you!</p>
+          <p><strong>Teacher:</strong> ${process.env.TEACHER_NAME || 'To be assigned'}</p>
+          <p>We look forward to seeing you! </p>
         `
       });
     }
