@@ -124,7 +124,6 @@ const UserSchema = new Schema({
 }, { timestamps: true });
 const User = model('User', UserSchema);
 
-// ===== UPDATED Booking Schema with UTC start/end =====
 const BookingSchema = new Schema({
   user: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   email: { type: String, required: true },
@@ -134,12 +133,8 @@ const BookingSchema = new Schema({
   childAge: { type: Number },
   country: { type: String },
   timeZone: { type: String },
-  // Legacy fields (kept for backward compatibility)
-  dateStr: { type: String },  // e.g. "2025-09-20" – will be deprecated
-  timeStr: { type: String },  // e.g. "14:00" – will be deprecated
-  // New UTC fields
-  start: { type: Date, required: true },
-  end: { type: Date, required: true },
+  dateStr: { type: String, required: true },  // e.g. "2025-09-20"
+  timeStr: { type: String, required: true },  // e.g. "14:00"
   level:   { type: String, required: true },
   status:  { type: String, default: 'Scheduled' }, // Scheduled | Completed | Cancelled | No-Show | Rescheduled
   teacherName: { type: String, default: process.env.TEACHER_NAME || 'Teacher' }
@@ -421,16 +416,9 @@ app.get('/api/me', optionalAuth, async (req, res) => {
 
 /* ---------------- Bookings (student) ---------------- */
 
-// Helper to create UTC Date from date and time strings (assumed UTC)
-function createUtcDate(dateStr, timeStr) {
-  if (!dateStr || !timeStr) return null;
-  return new Date(dateStr + 'T' + timeStr + 'Z');
-}
-
-// Helper to check if a slot is already booked (using UTC start)
-async function isSlotBooked(start, excludeBookingId = null) {
-  if (!start) return false;
-  const query = { start, status: { $in: ['Scheduled', 'Rescheduled'] } };
+// Helper to check if a slot is already booked (excluding a specific booking id)
+async function isSlotBooked(dateStr, timeStr, excludeBookingId = null) {
+  const query = { dateStr, timeStr, status: { $in: ['Scheduled', 'Rescheduled'] } };
   if (excludeBookingId) {
     query._id = { $ne: excludeBookingId };
   }
@@ -444,12 +432,8 @@ app.post('/api/bookings/trial', optionalAuth, async (req, res) => {
     const { date, time, level, phone, childName, parentName, childAge, country, timeZone } = req.body || {};
     if (!date || !time) return res.status(400).json({ success:false, message:'date and time are required' });
 
-    const start = createUtcDate(date, time);
-    if (!start) return res.status(400).json({ success:false, message:'Invalid date/time' });
-    const end = new Date(start.getTime() + 60 * 60 * 1000); // 1 hour duration
-
     // Check if slot already taken
-    if (await isSlotBooked(start)) {
+    if (await isSlotBooked(date, time)) {
       return res.status(409).json({ success:false, message:'This time slot is already booked' });
     }
 
@@ -480,10 +464,8 @@ app.post('/api/bookings/trial', optionalAuth, async (req, res) => {
       childAge: childAge || null,
       country: country || '',
       timeZone: timeZone || '',
-      dateStr: date,   // keep legacy
-      timeStr: time,   // keep legacy
-      start,
-      end,
+      dateStr: date,
+      timeStr: time,
       level: level || 'Beginner',
       status: 'Scheduled',
       teacherName: process.env.TEACHER_NAME || 'Teacher'
@@ -538,12 +520,8 @@ app.post('/api/book', auth, async (req, res) => {
       return res.status(400).json({ success:false, message:'Missing required fields' });
     }
 
-    const start = createUtcDate(date, time);
-    if (!start) return res.status(400).json({ success:false, message:'Invalid date/time' });
-    const end = new Date(start.getTime() + 60 * 60 * 1000);
-
     // Check if slot already taken
-    if (await isSlotBooked(start)) {
+    if (await isSlotBooked(date, time)) {
       return res.status(409).json({ success:false, message:'This time slot is already booked' });
     }
 
@@ -551,11 +529,7 @@ app.post('/api/book', auth, async (req, res) => {
       user: req.user.uid,
       email, childName, parentName, childAge, country, timeZone,
       phone: phone || '',
-      dateStr: date,
-      timeStr: time,
-      start,
-      end,
-      level,
+      dateStr: date, timeStr: time, level,
       status: 'Scheduled',
       teacherName: process.env.TEACHER_NAME || 'Teacher'
     });
@@ -602,15 +576,7 @@ app.post('/api/book', auth, async (req, res) => {
 app.get('/api/my-bookings', auth, async (req, res) => {
   try {
     const items = await Booking.find({ user: req.user.uid }).sort({ createdAt: -1 }).lean();
-    // For each, ensure start/end are present (compute from legacy if needed)
-    const bookings = items.map(x => {
-      if (!x.start && x.dateStr && x.timeStr) {
-        x.start = createUtcDate(x.dateStr, x.timeStr);
-        if (x.start) x.end = new Date(x.start.getTime() + 60 * 60 * 1000);
-      }
-      return { ...x, status: (x.status||'').toLowerCase() };
-    });
-    res.json({ success:true, bookings });
+    res.json({ success:true, bookings: items.map(x => ({ ...x, status: (x.status||'').toLowerCase() })) });
   } catch (e) {
     console.error('List bookings error:', e);
     res.status(500).json({ success:false, message:'Failed to list bookings' });
@@ -622,10 +588,6 @@ app.get('/api/my-bookings/latest', auth, async (req, res) => {
     const b = await Booking.findOne({ user: req.user.uid }).sort({ createdAt: -1 }).lean();
     if (!b) return res.json({ success:true, booking: null });
     if (b.status) b.status = String(b.status).toLowerCase();
-    if (!b.start && b.dateStr && b.timeStr) {
-      b.start = createUtcDate(b.dateStr, b.timeStr);
-      if (b.start) b.end = new Date(b.start.getTime() + 60 * 60 * 1000);
-    }
     res.json({ success:true, booking: b });
   } catch (e) {
     console.error('Latest booking error:', e);
@@ -669,14 +631,9 @@ app.post('/api/bookings/:id/reschedule', auth, async (req, res) => {
     const b = await Booking.findOne({ _id: id, user: req.user.uid });
     if (!b) return res.status(404).json({ success:false, message:'Not found' });
     
-    let newStart = b.start;
+    // If new date/time provided, check if slot is already taken (excluding current booking)
     if (date && time) {
-      newStart = createUtcDate(date, time);
-      if (!newStart) return res.status(400).json({ success:false, message:'Invalid new date/time' });
-
-      // Check if new slot is already taken (excluding current booking)
-      const conflict = await Booking.findOne({ start: newStart, status: { $in: ['Scheduled','Rescheduled'] }, _id: { $ne: b._id } });
-      if (conflict) {
+      if (await isSlotBooked(date, time, b._id)) {
         return res.status(409).json({ success:false, message:'This time slot is already booked' });
       }
     }
@@ -687,10 +644,6 @@ app.post('/api/bookings/:id/reschedule', auth, async (req, res) => {
     if (date) b.dateStr = date;
     if (time) b.timeStr = time;
     if (level) b.level = level;
-    if (newStart) {
-      b.start = newStart;
-      b.end = new Date(newStart.getTime() + 60 * 60 * 1000);
-    }
     b.status = 'Rescheduled';
     await b.save();
 
@@ -730,6 +683,8 @@ app.post('/api/bookings/:id/reschedule', auth, async (req, res) => {
 
 /* ---------------- Admin APIs ---------------- */
 
+// ... (all admin endpoints remain exactly as in the original file, unchanged)
+
 // Quick SMTP test endpoint (send to ADMIN_TO)
 app.post('/api/admin/test-email', requireAdmin, async (req, res) => {
   try {
@@ -764,15 +719,8 @@ app.get('/api/admin/users', requireAdmin, async (req, res) => {
   }
   if (since || till) {
     cond.createdAt = {};
-    // Interpret since/till as UTC dates
-    if (since) {
-      const sinceDate = new Date(since + 'T00:00:00Z');
-      if (!isNaN(sinceDate)) cond.createdAt.$gte = sinceDate;
-    }
-    if (till) {
-      const tillDate = new Date(till + 'T23:59:59.999Z');
-      if (!isNaN(tillDate)) cond.createdAt.$lte = tillDate;
-    }
+    if (since) cond.createdAt.$gte = new Date(since);
+    if (till)  cond.createdAt.$lte = new Date(till);
   }
 
   const per = Math.min(Number(limit)||ADMIN_PAGE_SIZE_DEFAULT, 200);
@@ -805,15 +753,8 @@ app.get('/api/admin/bookings', requireAdmin, async (req, res) => {
   if (email)  cond.email = new RegExp(email, 'i');
   if (dateFrom || dateTo) {
     cond.createdAt = {};
-    // Interpret as UTC
-    if (dateFrom) {
-      const fromDate = new Date(dateFrom + 'T00:00:00Z');
-      if (!isNaN(fromDate)) cond.createdAt.$gte = fromDate;
-    }
-    if (dateTo) {
-      const toDate = new Date(dateTo + 'T23:59:59.999Z');
-      if (!isNaN(toDate)) cond.createdAt.$lte = toDate;
-    }
+    if (dateFrom) cond.createdAt.$gte = new Date(dateFrom);
+    if (dateTo)   cond.createdAt.$lte = new Date(dateTo);
   }
 
   const per = Math.min(Number(limit)||ADMIN_PAGE_SIZE_DEFAULT, 200);
@@ -826,19 +767,10 @@ app.get('/api/admin/bookings', requireAdmin, async (req, res) => {
     Booking.countDocuments(cond)
   ]);
 
-  // Ensure start/end are present for frontend
-  const bookings = items.map(x => {
-    if (!x.start && x.dateStr && x.timeStr) {
-      x.start = createUtcDate(x.dateStr, x.timeStr);
-      if (x.start) x.end = new Date(x.start.getTime() + 60 * 60 * 1000);
-    }
-    return x;
-  });
-
   res.json({
     success: true,
     page: pg, limit: per, total,
-    bookings
+    bookings: items
   });
 });
 
@@ -860,15 +792,6 @@ app.patch('/api/admin/bookings/:id/status', requireAdmin, async (req, res) => {
   if (timeStr) b.timeStr = timeStr;
   if (level)   b.level   = level;
   if (teacherName) b.teacherName = teacherName;
-
-  // If date/time changed, update start/end
-  if (dateStr && timeStr) {
-    const newStart = createUtcDate(dateStr, timeStr);
-    if (newStart) {
-      b.start = newStart;
-      b.end = new Date(newStart.getTime() + 60 * 60 * 1000);
-    }
-  }
 
   await b.save();
 
@@ -923,11 +846,6 @@ app.post('/api/admin/bookings/create', requireAdmin, async (req, res) => {
         isGuest: true
       });
     }
-
-    const start = createUtcDate(dateStr, timeStr);
-    if (!start) return res.status(400).json({ success:false, message:'Invalid date/time' });
-    const end = new Date(start.getTime() + 60 * 60 * 1000);
-
     const booking = await Booking.create({
       user: user._id,
       email: user.email,
@@ -938,8 +856,6 @@ app.post('/api/admin/bookings/create', requireAdmin, async (req, res) => {
       timeZone: timeZone || '',
       dateStr,
       timeStr,
-      start,
-      end,
       level,
       status: 'Scheduled',
       teacherName: teacherName || process.env.TEACHER_NAME || 'Teacher'
@@ -956,14 +872,8 @@ app.post('/api/admin/bookings/create', requireAdmin, async (req, res) => {
 // GET /api/schedule?from=YYYY-MM-DD&to=YYYY-MM-DD
 app.get('/api/schedule', optionalAuth, async (req, res) => {
   try {
-    const fromStr = req.query.from;
-    const toStr = req.query.to;
-    if (!fromStr || !toStr) {
-      return res.status(400).json({ success:false, message:'from and to required' });
-    }
-    // Create UTC boundaries
-    const from = new Date(fromStr + 'T00:00:00Z');
-    const to   = new Date(toStr   + 'T23:59:59.999Z');
+    const from = new Date(req.query.from);
+    const to   = new Date(req.query.to);
     if (isNaN(from) || isNaN(to)) {
       return res.status(400).json({ success:false, message:'Invalid range' });
     }
@@ -985,13 +895,22 @@ app.get('/api/schedule', optionalAuth, async (req, res) => {
 
     for (const b of lessons) {
       try {
-        // Prefer start field if available
-        let start = b.start;
-        if (!start && b.dateStr && b.timeStr) {
-          start = createUtcDate(b.dateStr, b.timeStr);
+        const ds = String(b.dateStr || '').trim();
+        const ts = String(b.timeStr || '').trim();
+        if (!ds) continue;
+
+        let start = new Date(ds + (ts ? (' ' + ts) : ''));
+        if (isNaN(start)) {
+          const m = ds.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+          if (m) {
+            const [_, dd, mm, yyyy] = m;
+            const hh = (ts.match(/^(\d{1,2})/) || [])[1] || '00';
+            const mi = (ts.match(/:(\d{2})/) || [])[1] || '00';
+            start = new Date(`${yyyy}-${mm}-${dd}T${hh.padStart(2,'0')}:${mi}:00`);
+          }
         }
-        if (!start) continue;
-        const end = b.end || new Date(start.getTime() + 60 * 60 * 1000);
+        if (isNaN(start)) continue;
+        const end = new Date(start.getTime() + 60 * 60 * 1000);
 
         addItem(
           'lesson',
@@ -1009,7 +928,7 @@ app.get('/api/schedule', optionalAuth, async (req, res) => {
       } catch {}
     }
 
-    // 2) Slots from TimeSlot (keep as is, but ensure dates are UTC)
+    // 2) Slots from TimeSlot
     const slots = await TimeSlot.find({
       isActive: true,
       $or: [
@@ -1030,7 +949,7 @@ app.get('/api/schedule', optionalAuth, async (req, res) => {
       addItem('slot', 'Available', s.startISO, s.endISO, { teacherName: s.teacherName });
     }
 
-    // Recurring slots expanded per day (using UTC dates)
+    // Recurring slots expanded per day
     const dayMs = 24 * 60 * 60 * 1000;
     for (const s of slots) {
       if (s.kind !== 'recurring') continue;
@@ -1039,11 +958,11 @@ app.get('/api/schedule', optionalAuth, async (req, res) => {
       const rangeStart = new Date(Math.max(vFrom.getTime(), from.getTime()));
       const rangeEnd   = new Date(Math.min(vTo.getTime(),   to.getTime()));
       for (let d = new Date(rangeStart); d <= rangeEnd; d = new Date(d.getTime() + dayMs)) {
-        if (d.getUTCDay() !== Number(s.dow)) continue; // use UTC day
+        if (d.getDay() !== Number(s.dow)) continue;
         const [sh, sm] = String(s.startTime || '0:0').split(':').map(Number);
         const [eh, em] = String(s.endTime   || '0:0').split(':').map(Number);
-        const start = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), sh, sm, 0));
-        const end   = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), eh, em, 0));
+        const start = new Date(d); start.setHours(sh || 0, sm || 0, 0, 0);
+        const end   = new Date(d); end.setHours(eh || 0, em || 0, 0, 0);
         addItem('slot', 'Available', start, end, { teacherName: s.teacherName });
       }
     }
@@ -1067,8 +986,8 @@ app.get('/api/admin/slots', requireAdmin, async (req, res) => {
     if (active === 'false') q.isActive = false;
 
     if (from || to) {
-      const fromDt = from ? new Date(from + 'T00:00:00Z') : null;
-      const toDt   = to   ? new Date(to   + 'T23:59:59.999Z') : null;
+      const fromDt = from ? new Date(from) : null;
+      const toDt   = to   ? new Date(to)   : null;
       q.$or = [
         { kind: 'oneoff',
           ...(fromDt ? { endISO:   { $gte: fromDt } } : {}),
