@@ -416,19 +416,33 @@ app.get('/api/me', optionalAuth, async (req, res) => {
 
 /* ---------------- Bookings (student) ---------------- */
 
-// TRIAL booking — ИСПРАВЛЕНО: Добавлены уведомления и сохранение телефона
+// Helper to check if a slot is already booked (excluding a specific booking id)
+async function isSlotBooked(dateStr, timeStr, excludeBookingId = null) {
+  const query = { dateStr, timeStr, status: { $in: ['Scheduled', 'Rescheduled'] } };
+  if (excludeBookingId) {
+    query._id = { $ne: excludeBookingId };
+  }
+  const existing = await Booking.findOne(query);
+  return !!existing;
+}
+
+// TRIAL booking
 app.post('/api/bookings/trial', optionalAuth, async (req, res) => {
   try {
-    // Получаем phone из запроса
     const { date, time, level, phone, childName, parentName, childAge, country, timeZone } = req.body || {};
     if (!date || !time) return res.status(400).json({ success:false, message:'date and time are required' });
+
+    // Check if slot already taken
+    if (await isSlotBooked(date, time)) {
+      return res.status(409).json({ success:false, message:'This time slot is already booked' });
+    }
 
     let userDoc = null;
     if (req.user && req.user.uid) {
       userDoc = await User.findById(req.user.uid);
       if (!userDoc) return res.status(401).json({ success:false, message:'Auth user not found' });
     } else {
-      // гость
+      // guest
       const candidates = [
         req.body.email, req.body.userEmail, req.body.contactEmail,
         req.body.login, req.body.username, req.headers['x-user-email']
@@ -441,11 +455,10 @@ app.post('/api/bookings/trial', optionalAuth, async (req, res) => {
       });
     }
 
-    // Создаем запись
     const booking = await Booking.create({
       user: userDoc._id,
       email: userDoc.email,
-      phone: phone || '', // Сохраняем телефон
+      phone: phone || '',
       childName: childName || 'Trial Student',
       parentName: parentName || (userDoc.firstName || 'Parent') + (userDoc.lastName ? ' ' + userDoc.lastName : ''),
       childAge: childAge || null,
@@ -458,9 +471,7 @@ app.post('/api/bookings/trial', optionalAuth, async (req, res) => {
       teacherName: process.env.TEACHER_NAME || 'Teacher'
     });
 
-    // --- ОТПРАВКА ПИСЕМ (ДОБАВЛЕНО) ---
-
-    // 1. Админу
+    // --- send emails (unchanged) ---
     await sendEmail({
       to: ADMIN_TO,
       subject: `🗓️ New trial booking: ${booking.childName} (${date} ${time})`,
@@ -477,7 +488,6 @@ app.post('/api/bookings/trial', optionalAuth, async (req, res) => {
       `
     });
 
-    // 2. Студенту (если email не фейковый гостевой)
     if (booking.email && !booking.email.includes('guest.local')) {
       await sendEmail({
         to: booking.email,
@@ -502,6 +512,7 @@ app.post('/api/bookings/trial', optionalAuth, async (req, res) => {
   }
 });
 
+// Regular booking endpoint (for schedule lessons)
 app.post('/api/book', auth, async (req, res) => {
   try {
     const { email, childName, parentName, childAge, country, timeZone, date, time, level, phone } = req.body;
@@ -509,10 +520,15 @@ app.post('/api/book', auth, async (req, res) => {
       return res.status(400).json({ success:false, message:'Missing required fields' });
     }
 
+    // Check if slot already taken
+    if (await isSlotBooked(date, time)) {
+      return res.status(409).json({ success:false, message:'This time slot is already booked' });
+    }
+
     const booking = await Booking.create({
       user: req.user.uid,
       email, childName, parentName, childAge, country, timeZone,
-      phone: phone || '', // Сохраняем телефон если передан
+      phone: phone || '',
       dateStr: date, timeStr: time, level,
       status: 'Scheduled',
       teacherName: process.env.TEACHER_NAME || 'Teacher'
@@ -521,7 +537,7 @@ app.post('/api/book', auth, async (req, res) => {
     // Send to admin
     await sendEmail({
       to: ADMIN_TO,
-      subject: `🗓️ New trial booking: ${childName} (${date} ${time})`,
+      subject: `🗓️ New lesson booking: ${childName} (${date} ${time})`,
       html: `
         <h2>New booking</h2>
         <p><strong>Child:</strong> ${childName}</p>
@@ -537,11 +553,11 @@ app.post('/api/book', auth, async (req, res) => {
     // Send confirmation to student
     await sendEmail({
       to: email,
-      subject: `Your Trial Lesson Confirmation - ${date} at ${time}`,
+      subject: `Your Lesson Confirmation - ${date} at ${time}`,
       html: `
         <h2>Lesson Booked Successfully!</h2>
         <p>Dear ${parentName},</p>
-        <p>Your trial lesson for <strong>${childName}</strong> has been scheduled.</p>
+        <p>Your lesson for <strong>${childName}</strong> has been scheduled.</p>
         <p><strong>Date:</strong> ${date}</p>
         <p><strong>Time:</strong> ${time} (${timeZone||''})</p>
         <p><strong>Level:</strong> ${level}</p>
@@ -607,7 +623,7 @@ app.post('/api/bookings/:id/cancel', auth, async (req, res) => {
   }
 });
 
-// RESCHEDULE — ИСПРАВЛЕНО: Добавлены уведомления
+// RESCHEDULE
 app.post('/api/bookings/:id/reschedule', auth, async (req, res) => {
   try {
     const { id } = req.params;
@@ -615,18 +631,23 @@ app.post('/api/bookings/:id/reschedule', auth, async (req, res) => {
     const b = await Booking.findOne({ _id: id, user: req.user.uid });
     if (!b) return res.status(404).json({ success:false, message:'Not found' });
     
+    // If new date/time provided, check if slot is already taken (excluding current booking)
+    if (date && time) {
+      if (await isSlotBooked(date, time, b._id)) {
+        return res.status(409).json({ success:false, message:'This time slot is already booked' });
+      }
+    }
+
     const oldDate = b.dateStr;
     const oldTime = b.timeStr;
 
     if (date) b.dateStr = date;
     if (time) b.timeStr = time;
     if (level) b.level = level;
-    b.status = 'Rescheduled'; // Обновляем статус
+    b.status = 'Rescheduled';
     await b.save();
 
-    // --- ОТПРАВКА УВЕДОМЛЕНИЙ ---
-
-    // 1. Админу
+    // --- send notifications ---
     await sendEmail({
       to: ADMIN_TO,
       subject: `🔄 Lesson Rescheduled: ${b.childName}`,
@@ -640,7 +661,6 @@ app.post('/api/bookings/:id/reschedule', auth, async (req, res) => {
       `
     });
 
-    // 2. Студенту
     await sendEmail({
       to: b.email,
       subject: `Lesson Rescheduled - ${b.dateStr}`,
@@ -662,6 +682,8 @@ app.post('/api/bookings/:id/reschedule', auth, async (req, res) => {
 });
 
 /* ---------------- Admin APIs ---------------- */
+
+// ... (all admin endpoints remain exactly as in the original file, unchanged)
 
 // Quick SMTP test endpoint (send to ADMIN_TO)
 app.post('/api/admin/test-email', requireAdmin, async (req, res) => {
@@ -898,7 +920,7 @@ app.get('/api/schedule', optionalAuth, async (req, res) => {
           {
             status: b.status || 'Scheduled',
             teacherName: b.teacherName || (process.env.TEACHER_NAME || 'Teacher'),
-            bookingId: b._id,           // <-- ADDED
+            bookingId: b._id,
             level: b.level,
             childName: b.childName
           }
