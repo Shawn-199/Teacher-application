@@ -127,7 +127,7 @@ const User = model('User', UserSchema);
 const BookingSchema = new Schema({
   user: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   email: { type: String, required: true },
-  phone: { type: String, default: 'Not provided' }, // ДОБАВЬ ЭТУ СТРОКУ
+  phone: { type: String, default: 'Not provided' },
   childName: { type: String, required: true },
   parentName: { type: String, required: true },
   childAge: { type: Number },
@@ -190,7 +190,6 @@ transporter.verify((error, success) => {
 });
 
 const ADMIN_TO = process.env.ADMIN_BOOKINGS_TO || process.env.NOTIFY_TO || process.env.EMAIL_USER;
-
 
 const FROM_EMAIL = process.env.BREVO_FROM || process.env.EMAIL_USER;
 const REPLY_TO   = process.env.REPLY_TO   || process.env.NOTIFY_TO || process.env.EMAIL_USER;
@@ -880,7 +879,6 @@ app.get('/api/schedule', optionalAuth, async (req, res) => {
 
         let start = new Date(ds + (ts ? (' ' + ts) : ''));
         if (isNaN(start)) {
-          // fallback DD.MM.YYYY
           const m = ds.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
           if (m) {
             const [_, dd, mm, yyyy] = m;
@@ -897,7 +895,13 @@ app.get('/api/schedule', optionalAuth, async (req, res) => {
           b.level ? `${b.level} Lesson` : 'Lesson',
           start,
           end,
-          { status: b.status || 'Scheduled', teacherName: b.teacherName || (process.env.TEACHER_NAME || 'Teacher') }
+          {
+            status: b.status || 'Scheduled',
+            teacherName: b.teacherName || (process.env.TEACHER_NAME || 'Teacher'),
+            bookingId: b._id,           // <-- ADDED
+            level: b.level,
+            childName: b.childName
+          }
         );
       } catch {}
     }
