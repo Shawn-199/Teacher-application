@@ -11,6 +11,8 @@ const jwt = require('jsonwebtoken');
 const ffmpegPath = require('ffmpeg-static');
 const ffmpeg = require('fluent-ffmpeg');
 const { Readable, PassThrough } = require('stream');
+const fs = require('fs');
+const path = require('path');
 require('dotenv').config();
 
 // ---- Startup sanity checks ----
@@ -270,100 +272,144 @@ async function requireAdmin(req, res, next) {
 app.get('/health', (req, res) => res.json({ ok: true }));
 
 /* ---------------- Teachers form (audio) ---------------- */
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 25 * 1024 * 1024 }
+// Configure multer with disk storage to avoid memory exhaustion
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const tmpDir = path.join('/tmp', 'uploads-' + Date.now());
+    fs.mkdirSync(tmpDir, { recursive: true });
+    cb(null, tmpDir);
+  },
+  filename: (req, file, cb) => {
+    const safeName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
+    cb(null, Date.now() + '-' + safeName);
+  }
 });
-app.post('/submit', upload.any(), async (req, res) => {
-  try {
-    // Check email configuration first
-    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-      console.error('Email configuration missing - cannot send teacher application');
-      return res.status(500).json({ success:false, message:'Email service not configured' });
-    }
-    
-    const files = {};
-    for (const f of (req.files || [])) files[f.fieldname] = f;
+const upload = multer({
+  storage: storage,
+  limits: { fileSize: 25 * 1024 * 1024 } // 25MB per file
+}).any();
 
-    console.log('FILES:', (req.files || []).map(f => ({ field: f.fieldname, name: f.originalname, size: f.size, type: f.mimetype })));
-    const fQ1 = files['audioQ1'] || null;
-    const fQ2 = files['audioQ2'] || null;
-    const fMain = files['audio'] || null;
-    const fCV = files['cv'] || files['resume'] || files['cvFile'] || null;
-
-    if (!fCV) {
-      return res.status(400).json({ success: false, message: 'Missing required file: CV' });
-    }
-    if (!fQ1 && !fQ2 && !fMain) {
-      return res.status(400).json({ success: false, message: 'Missing audio file (audio, audioQ1 or audioQ2)' });
+app.post('/submit', (req, res) => {
+  upload(req, res, async (err) => {
+    if (err) {
+      return res.status(400).json({ success: false, message: err.message });
     }
 
-    const {
-      email='-', fullname='-', age='-', country='-', languages='',
-      timezone='-', experience='-', quizAnswers='{}', quizScore='-', quizPercentage='-'
-    } = req.body;
+    // Cleanup function to delete temporary directory
+    const tmpDir = req.files && req.files.length > 0 ? path.dirname(req.files[0].path) : null;
+    const cleanup = () => {
+      if (tmpDir && tmpDir.startsWith('/tmp')) {
+        fs.rm(tmpDir, { recursive: true, force: true }, () => {});
+      }
+    };
 
-    const parsedLanguages = languages ? String(languages).split(',').map(l=>l.trim()) : [];
+    try {
+      // Check email configuration first
+      if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+        console.error('Email configuration missing - cannot send teacher application');
+        cleanup();
+        return res.status(500).json({ success:false, message:'Email service not configured' });
+      }
 
-    const a1 = await normalizeToMp3(fQ1, 'speaking-q1.webm');
-    const a2 = await normalizeToMp3(fQ2, 'speaking-q2.webm');
-    const aMain = await normalizeToMp3(fMain, 'speaking-assessment.webm');
+      // Convert files from disk to buffers for processing
+      const filePromises = (req.files || []).map(async (f) => {
+        const buffer = await fs.promises.readFile(f.path);
+        return {
+          fieldname: f.fieldname,
+          originalname: f.originalname,
+          mimetype: f.mimetype,
+          buffer,
+          size: f.size
+        };
+      });
+      const fileObjs = await Promise.all(filePromises);
+      const files = {};
+      for (const f of fileObjs) files[f.fieldname] = f;
 
-    // Collect attachments: CV + audio (deduplicated)
-    const attachments = [];
-    function pushUnique(att) {
-      if (!att || !att.content) return;
-      try {
-        const hash = crypto.createHash('sha1').update(att.content).digest('hex');
-        pushUnique._seen = pushUnique._seen || new Set();
-        const aux = `${att.filename || ''}:${att.content.length}`;
-        const key = `${hash}:${aux}`;
-        if (!pushUnique._seen.has(key)) {
-          pushUnique._seen.add(key);
+      console.log('FILES:', fileObjs.map(f => ({ field: f.fieldname, name: f.originalname, size: f.size, type: f.mimetype })));
+      const fQ1 = files['audioQ1'] || null;
+      const fQ2 = files['audioQ2'] || null;
+      const fMain = files['audio'] || null;
+      const fCV = files['cv'] || files['resume'] || files['cvFile'] || null;
+
+      if (!fCV) {
+        cleanup();
+        return res.status(400).json({ success: false, message: 'Missing required file: CV' });
+      }
+      if (!fQ1 && !fQ2 && !fMain) {
+        cleanup();
+        return res.status(400).json({ success: false, message: 'Missing audio file (audio, audioQ1 or audioQ2)' });
+      }
+
+      const {
+        email='-', fullname='-', age='-', country='-', languages='',
+        timezone='-', experience='-', quizAnswers='{}', quizScore='-', quizPercentage='-'
+      } = req.body;
+
+      const parsedLanguages = languages ? String(languages).split(',').map(l=>l.trim()) : [];
+
+      const a1 = await normalizeToMp3(fQ1, 'speaking-q1.webm');
+      const a2 = await normalizeToMp3(fQ2, 'speaking-q2.webm');
+      const aMain = await normalizeToMp3(fMain, 'speaking-assessment.webm');
+
+      // Collect attachments: CV + audio (deduplicated)
+      const attachments = [];
+      function pushUnique(att) {
+        if (!att || !att.content) return;
+        try {
+          const hash = crypto.createHash('sha1').update(att.content).digest('hex');
+          pushUnique._seen = pushUnique._seen || new Set();
+          const aux = `${att.filename || ''}:${att.content.length}`;
+          const key = `${hash}:${aux}`;
+          if (!pushUnique._seen.has(key)) {
+            pushUnique._seen.add(key);
+            attachments.push(att);
+          }
+        } catch (e) {
+          // Fallback: still push if hashing fails
           attachments.push(att);
         }
-      } catch (e) {
-        // Fallback: still push if hashing fails
-        attachments.push(att);
       }
-    }
 
-    // CV
-    if (fCV) {
-      pushUnique({
-        filename: fCV.originalname || 'CV',
-        content:  fCV.buffer,
-        contentType: fCV.mimetype || 'application/octet-stream'
+      // CV
+      if (fCV) {
+        pushUnique({
+          filename: fCV.originalname || 'CV',
+          content:  fCV.buffer,
+          contentType: fCV.mimetype || 'application/octet-stream'
+        });
+      }
+
+      // Audio (only if present & unique)
+      if (a1)    pushUnique(a1);
+      if (a2)    pushUnique(a2);
+      if (aMain) pushUnique(aMain);
+
+      await sendEmail({
+        to: ADMIN_TO,
+        subject: `🎓 Новая заявка от ${fullname}`,
+        html: `
+          <h2>Новая заявка</h2>
+          <p><strong>Email:</strong> ${email}</p>
+          <p><strong>Имя:</strong> ${fullname}</p>
+          <p><strong>Страна:</strong> ${country}</p>
+          <p><strong>Возраст:</strong> ${age}</p>
+          <p><strong>Часовой пояс:</strong> ${timezone}</p>
+          <p><strong>Языки:</strong> ${parsedLanguages.join(', ')}</p>
+          <p><strong>Опыт:</strong> ${experience}</p>
+          <p><strong>Тест:</strong> ${quizScore}/20 (${quizPercentage}%)</p>
+        `,
+        attachments
       });
+
+      cleanup();
+      res.status(201).json({ success:true, message:'Application submitted and email sent' });
+    } catch (err) {
+      console.error('Error submitting application:', err);
+      cleanup();
+      res.status(500).json({ success:false, message:'Internal server error', error: err.message });
     }
-
-    // Audio (only if present & unique)
-    if (a1)    pushUnique(a1);
-    if (a2)    pushUnique(a2);
-    if (aMain) pushUnique(aMain);
-
-    await sendEmail({
-      to: ADMIN_TO,
-      subject: `🎓 Новая заявка от ${fullname}`,
-      html: `
-        <h2>Новая заявка</h2>
-        <p><strong>Email:</strong> ${email}</p>
-        <p><strong>Имя:</strong> ${fullname}</p>
-        <p><strong>Страна:</strong> ${country}</p>
-        <p><strong>Возраст:</strong> ${age}</p>
-        <p><strong>Часовой пояс:</strong> ${timezone}</p>
-        <p><strong>Языки:</strong> ${parsedLanguages.join(', ')}</p>
-        <p><strong>Опыт:</strong> ${experience}</p>
-        <p><strong>Тест:</strong> ${quizScore}/20 (${quizPercentage}%)</p>
-      `,
-      attachments
-    });
-
-    res.status(201).json({ success:true, message:'Application submitted and email sent' });
-  } catch (err) {
-    console.error('Error submitting application:', err);
-    res.status(500).json({ success:false, message:'Internal server error', error: err.message });
-  }
+  });
 });
 
 /* ---------------- Auth APIs ---------------- */
@@ -1093,24 +1139,24 @@ const Review = model('Review', ReviewSchema);
 app.get('/api/reviews/list', async (req, res) => {
   try {
     const reviews = await Review.find({ status: 'Approved' })
-      // Добавили country, role, child, age в выборку
-      .select('name ratings text createdAt country role child age') 
+      .select('name ratings text createdAt country role child age')
       .sort({ createdAt: -1 })
       .limit(50);
     
-    // Stats calc
-    const allApproved = await Review.find({ status: 'Approved' });
-    const count = allApproved.length;
-    let avg = 0;
-    if (count > 0) {
-      const sum = allApproved.reduce((acc, r) => {
-        const reviewAvg = (r.ratings.course + r.ratings.teacher + r.ratings.platform) / 3;
-        return acc + reviewAvg;
-      }, 0);
-      avg = (sum / count).toFixed(1);
-    }
+    // Compute stats using aggregation (efficient)
+    const statsResult = await Review.aggregate([
+      { $match: { status: 'Approved' } },
+      { $group: {
+          _id: null,
+          count: { $sum: 1 },
+          avgScore: { $avg: { $avg: ['$ratings.course', '$ratings.teacher', '$ratings.platform'] } }
+      } }
+    ]);
 
-    res.json({ success: true, reviews, stats: { count, avg } });
+    const stats = statsResult[0] || { count: 0, avgScore: 0 };
+    const avg = stats.avgScore ? stats.avgScore.toFixed(1) : '0.0';
+
+    res.json({ success: true, reviews, stats: { count: stats.count, avg } });
   } catch (e) {
     res.status(500).json({ success: false, message: 'Error fetching reviews' });
   }
