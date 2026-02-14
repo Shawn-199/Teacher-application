@@ -484,15 +484,16 @@ app.get('/api/me', optionalAuth, async (req, res) => {
 
 /* ---------------- Bookings (student) ---------------- */
 
-// Helper to check if a slot is already booked (excluding a specific booking id) – using start field
-async function isSlotBooked(startDate, excludeBookingId = null) {
+// Helper to check if a slot is already booked (excluding a specific booking id) – using start field and duration
+async function isSlotBooked(start, duration = 25, excludeId = null) {
+  const end = new Date(start.getTime() + duration * 60 * 1000);
   const query = {
-    start: startDate,
-    status: { $in: ['Scheduled', 'Rescheduled'] }
+    status: { $in: ['Scheduled', 'Rescheduled'] },
+    $or: [
+      { start: { $lt: end }, end: { $gt: start } } // any overlap
+    ]
   };
-  if (excludeBookingId) {
-    query._id = { $ne: excludeBookingId };
-  }
+  if (excludeId) query._id = { $ne: excludeId };
   const existing = await Booking.findOne(query);
   return !!existing;
 }
@@ -729,7 +730,7 @@ app.post('/api/bookings/:id/reschedule', auth, async (req, res) => {
     const newTimeStr = newStart.toISOString().split('T')[1].substring(0,5);
 
     // Check conflict excluding current booking
-    if (await isSlotBooked(newStart, b._id)) {
+    if (await isSlotBooked(newStart, 25, b._id)) {
       return res.status(409).json({ success:false, message:'This time slot is already booked' });
     }
 
@@ -948,6 +949,9 @@ app.get('/api/admin/stats', requireAdmin, async (_req, res) => {
 });
 
 /* ---------------- NEW: Admin create lesson ---------------- */
+// Fixed teacher timezone offset (Asia/Dushanbe, UTC+5)
+const TEACHER_TZ_OFFSET = 5; // hours ahead of UTC
+
 app.post('/api/admin/bookings/create', requireAdmin, async (req, res) => {
   try {
     const { email, childName, parentName, childAge, country, timeZone, dateStr, timeStr, level, teacherName, teacherId } = req.body || {};
@@ -963,8 +967,12 @@ app.post('/api/admin/bookings/create', requireAdmin, async (req, res) => {
         isGuest: true
       });
     }
-    const start = new Date(`${dateStr}T${timeStr}:00`);
+    // Admin enters local time (teacher's timezone). Convert to UTC before storing.
+    const localDate = new Date(`${dateStr}T${timeStr}:00`); // local in server's timezone? Better to treat as teacher's fixed offset.
+    // Assume the input is in teacher's local time (UTC+5) and convert to UTC.
+    const start = new Date(localDate.getTime() - TEACHER_TZ_OFFSET * 60 * 60 * 1000);
     const end = new Date(start.getTime() + 25 * 60 * 1000); // 25 minutes
+
     const booking = await Booking.create({
       user: user._id,
       email: user.email,
@@ -973,8 +981,8 @@ app.post('/api/admin/bookings/create', requireAdmin, async (req, res) => {
       childAge: childAge ?? null,
       country: country || '',
       timeZone: timeZone || '',
-      dateStr,
-      timeStr,
+      dateStr: start.toISOString().split('T')[0],
+      timeStr: start.toISOString().split('T')[1].substring(0,5),
       level,
       status: 'Scheduled',
       teacherName: teacherName || process.env.TEACHER_NAME || 'Teacher',
