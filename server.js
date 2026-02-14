@@ -121,7 +121,7 @@ const UserSchema = new Schema({
   passwordHash: { type: String, required: true },
   firstName: String,
   lastName: String,
-  role: { type: String, default: 'student' }, // 'student' | 'manager' | 'admin'
+  role: { type: String, default: 'student' }, // 'student' | 'teacher' | 'manager' | 'admin'
   isGuest: { type: Boolean, default: false }
 }, { timestamps: true });
 const User = model('User', UserSchema);
@@ -140,7 +140,9 @@ const BookingSchema = new Schema({
   level:   { type: String, required: true },
   status:  { type: String, default: 'Scheduled' }, // Scheduled | Completed | Cancelled | No-Show | Rescheduled
   teacherName: { type: String, default: process.env.TEACHER_NAME || 'Teacher' },
-  // NEW: start and end timestamps (ISO dates)
+  // NEW: teacherId (reference to User)
+  teacherId: { type: Schema.Types.ObjectId, ref: 'User', index: true },
+  // start and end timestamps (ISO dates)
   start: { type: Date, required: true },
   end: { type: Date, required: true }
 }, { timestamps: true });
@@ -161,6 +163,8 @@ try { TimeSlot = mongoose.model('TimeSlot'); } catch (e) {
     startISO: Date,
     endISO: Date,
     teacherName: { type: String, default: process.env.TEACHER_NAME || 'Teacher' },
+    // NEW: teacherId (reference to User)
+    teacherId: { type: Schema.Types.ObjectId, ref: 'User', index: true },
     note: String,
     isActive: { type: Boolean, default: true }
   }, { timestamps: true });
@@ -221,7 +225,11 @@ async function sendEmail(opts) {
 /* ---------------- JWT ---------------- */
 function signToken(user) {
   if (!process.env.JWT_SECRET) throw new Error('Missing JWT_SECRET in .env');
-  return jwt.sign({ uid: user._id, email: user.email }, process.env.JWT_SECRET, { expiresIn: '30d' });
+  return jwt.sign(
+    { uid: user._id, email: user.email, role: user.role },
+    process.env.JWT_SECRET,
+    { expiresIn: '30d' }
+  );
 }
 function auth(req, res, next) {
   try {
@@ -267,6 +275,24 @@ async function requireAdmin(req, res, next) {
     next();
   } catch (e) {
     console.error('requireAdmin error:', e);
+    return res.status(401).json({ success:false, message:'Invalid token' });
+  }
+}
+
+/* -------- Teacher (or Admin) guard -------- */
+async function requireTeacher(req, res, next) {
+  try {
+    const h = req.headers.authorization || '';
+    if (!h.startsWith('Bearer ')) return res.status(401).json({ success:false, message:'Missing token' });
+    const payload = jwt.verify(h.slice(7), process.env.JWT_SECRET);
+    const u = await User.findById(payload.uid).select('_id email role');
+    if (!u) return res.status(401).json({ success:false, message:'User not found' });
+    if (!['admin','manager','teacher'].includes(u.role)) {
+      return res.status(403).json({ success:false, message:'Teacher or admin only' });
+    }
+    req.teacher = { id: u._id, email: u.email, role: u.role };
+    next();
+  } catch (e) {
     return res.status(401).json({ success:false, message:'Invalid token' });
   }
 }
@@ -427,7 +453,7 @@ app.post('/api/register', async (req, res) => {
     });
 
     const token = signToken(user);
-    res.json({ success:true, token, user:{ id:user._id, email:user.email, firstName, lastName } });
+    res.json({ success:true, token, user:{ id:user._id, email:user.email, firstName, lastName, role:user.role } });
   } catch (e) {
     console.error('Register error:', e);
     res.status(500).json({ success:false, message:'Registration failed' });
@@ -443,7 +469,7 @@ app.post('/api/login', async (req, res) => {
     const ok = await bcrypt.compare(password, user.passwordHash);
     if (!ok) return res.status(401).json({ success:false, message:'Invalid credentials' });
     const token = signToken(user);
-    res.json({ success:true, token, user:{ id:user._id, email:user.email, firstName:user.firstName, lastName:user.lastName } });
+    res.json({ success:true, token, user:{ id:user._id, email:user.email, firstName:user.firstName, lastName:user.lastName, role:user.role } });
   } catch (e) {
     console.error('Login error:', e);
     res.status(500).json({ success:false, message:'Login failed' });
@@ -522,6 +548,7 @@ app.post('/api/bookings/trial', optionalAuth, async (req, res) => {
       level: level || 'Beginner',
       status: 'Scheduled',
       teacherName: process.env.TEACHER_NAME || 'Teacher',
+      // teacherId can be set later by admin, default null
       start,
       end
     });
@@ -593,6 +620,7 @@ app.post('/api/book', auth, async (req, res) => {
       dateStr, timeStr, level,
       status: 'Scheduled',
       teacherName: process.env.TEACHER_NAME || 'Teacher',
+      // teacherId can be set later
       start, end
     });
 
@@ -807,6 +835,18 @@ app.get('/api/admin/users', requireAdmin, async (req, res) => {
   });
 });
 
+// PATCH /api/admin/users/:id/role — change user role (admin only)
+app.patch('/api/admin/users/:id/role', requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { role } = req.body;
+  if (!['student','teacher','manager','admin'].includes(role)) {
+    return res.status(400).json({ success:false, message:'Invalid role' });
+  }
+  const user = await User.findByIdAndUpdate(id, { role }, { new: true }).select('_id email role');
+  if (!user) return res.status(404).json({ success:false, message:'User not found' });
+  res.json({ success:true, user });
+});
+
 // GET /api/admin/bookings — список бронирований с фильтрами
 app.get('/api/admin/bookings', requireAdmin, async (req, res) => {
   const {
@@ -844,7 +884,7 @@ app.get('/api/admin/bookings', requireAdmin, async (req, res) => {
 // PATCH /api/admin/bookings/:id/status — смена статуса/даты/времени/уровня/преподавателя
 app.patch('/api/admin/bookings/:id/status', requireAdmin, async (req, res) => {
   const { id } = req.params;
-  const { status, dateStr, timeStr, level, teacherName } = req.body || {};
+  const { status, dateStr, timeStr, level, teacherName, teacherId } = req.body || {};
 
   const b = await Booking.findById(id);
   if (!b) return res.status(404).json({ success:false, message:'Booking not found' });
@@ -859,6 +899,7 @@ app.patch('/api/admin/bookings/:id/status', requireAdmin, async (req, res) => {
   if (timeStr) b.timeStr = timeStr;
   if (level)   b.level   = level;
   if (teacherName) b.teacherName = teacherName;
+  if (teacherId) b.teacherId = teacherId;
 
   // If dateStr/timeStr changed, also update start/end (optional but recommended)
   if (dateStr && timeStr) {
@@ -909,7 +950,7 @@ app.get('/api/admin/stats', requireAdmin, async (_req, res) => {
 /* ---------------- NEW: Admin create lesson ---------------- */
 app.post('/api/admin/bookings/create', requireAdmin, async (req, res) => {
   try {
-    const { email, childName, parentName, childAge, country, timeZone, dateStr, timeStr, level, teacherName } = req.body || {};
+    const { email, childName, parentName, childAge, country, timeZone, dateStr, timeStr, level, teacherName, teacherId } = req.body || {};
     if (!email || !childName || !parentName || !dateStr || !timeStr || !level) {
       return res.status(400).json({ success:false, message:'Missing required fields: email, childName, parentName, dateStr, timeStr, level' });
     }
@@ -937,6 +978,7 @@ app.post('/api/admin/bookings/create', requireAdmin, async (req, res) => {
       level,
       status: 'Scheduled',
       teacherName: teacherName || process.env.TEACHER_NAME || 'Teacher',
+      teacherId: teacherId || null,
       start,
       end
     });
@@ -945,6 +987,76 @@ app.post('/api/admin/bookings/create', requireAdmin, async (req, res) => {
     console.error('Admin create lesson failed:', e);
     res.status(500).json({ success:false, message:'Admin create lesson failed' });
   }
+});
+
+/* ---------------- Teacher APIs ---------------- */
+
+// GET /api/teacher/schedule — teacher's bookings and slots for a date range
+app.get('/api/teacher/schedule', requireTeacher, async (req, res) => {
+  const { from, to } = req.query;
+  const teacherId = req.teacher.id;
+  const start = from ? new Date(from) : new Date(new Date().setDate(1)); // start of month
+  const end = to ? new Date(to) : new Date(new Date().setMonth(start.getMonth()+1, 0));
+
+  const [bookings, slots] = await Promise.all([
+    Booking.find({
+      teacherId,
+      start: { $gte: start, $lte: end },
+      status: { $in: ['Scheduled', 'Rescheduled'] }
+    }).lean(),
+    TimeSlot.find({
+      teacherId,
+      isActive: true,
+      $or: [
+        { kind: 'oneoff', startISO: { $lte: end }, endISO: { $gte: start } },
+        { kind: 'recurring', $or: [
+          { validFrom: { $lte: end }, validTo: { $gte: start } },
+          { validFrom: { $exists: false }, validTo: { $exists: false } }
+        ]}
+      ]
+    }).lean()
+  ]);
+
+  res.json({ success:true, bookings, slots });
+});
+
+// GET /api/teacher/slots — list teacher's own slots
+app.get('/api/teacher/slots', requireTeacher, async (req, res) => {
+  const teacherId = req.teacher.id;
+  const slots = await TimeSlot.find({ teacherId }).sort({ createdAt: -1 }).limit(500);
+  res.json({ success:true, slots });
+});
+
+// POST /api/teacher/slots — create a new slot
+app.post('/api/teacher/slots', requireTeacher, async (req, res) => {
+  const teacherId = req.teacher.id;
+  const teacher = await User.findById(teacherId);
+  if (!teacher) return res.status(404).json({ success:false, message:'Teacher not found' });
+
+  const slotData = { 
+    ...req.body, 
+    teacherId, 
+    teacherName: (teacher.firstName || '') + ' ' + (teacher.lastName || '')
+  };
+  const slot = await TimeSlot.create(slotData);
+  res.json({ success:true, slot });
+});
+
+// PATCH /api/teacher/slots/:id/toggle — toggle isActive
+app.patch('/api/teacher/slots/:id/toggle', requireTeacher, async (req, res) => {
+  const { id } = req.params;
+  const slot = await TimeSlot.findOne({ _id: id, teacherId: req.teacher.id });
+  if (!slot) return res.status(404).json({ success:false, message:'Slot not found or not yours' });
+  slot.isActive = !slot.isActive;
+  await slot.save();
+  res.json({ success:true, isActive: slot.isActive });
+});
+
+// DELETE /api/teacher/slots/:id — delete slot
+app.delete('/api/teacher/slots/:id', requireTeacher, async (req, res) => {
+  const { id } = req.params;
+  const result = await TimeSlot.deleteOne({ _id: id, teacherId: req.teacher.id });
+  res.json({ success: result.deletedCount > 0 });
 });
 
 /* ---------------- Schedule feed & Admin Slots ---------------- */
@@ -1010,7 +1122,7 @@ app.get('/api/schedule', optionalAuth, async (req, res) => {
     // One-off slots
     for (const s of slots) {
       if (s.kind !== 'oneoff') continue;
-      addItem('slot', 'Available', s.startISO, s.endISO, { teacherName: s.teacherName });
+      addItem('slot', 'Available', s.startISO, s.endISO, { teacherName: s.teacherName, teacherId: s.teacherId });
     }
 
     // Recurring slots expanded per day
@@ -1027,7 +1139,7 @@ app.get('/api/schedule', optionalAuth, async (req, res) => {
         const [eh, em] = String(s.endTime   || '0:0').split(':').map(Number);
         const start = new Date(d); start.setHours(sh || 0, sm || 0, 0, 0);
         const end   = new Date(d); end.setHours(eh || 0, em || 0, 0, 0);
-        addItem('slot', 'Available', start, end, { teacherName: s.teacherName });
+        addItem('slot', 'Available', start, end, { teacherName: s.teacherName, teacherId: s.teacherId });
       }
     }
 
@@ -1078,6 +1190,7 @@ app.get('/api/admin/slots', requireAdmin, async (req, res) => {
 
 app.post('/api/admin/slots', requireAdmin, async (req, res) => {
   try {
+    // If teacherId is not provided, you might want to assign a default? For now, accept from body.
     const s = await TimeSlot.create(req.body);
     res.json({ success:true, slot:s });
   } catch (e) {
@@ -1109,14 +1222,14 @@ app.post('/api/admin/slots/import', requireAdmin, uploadAny, async (req, res) =>
     } else {
       const text = f.buffer.toString('utf8');
       rows = text.split(/\r?\n/).map(l => l.split(',')).filter(a => a.length>1)
-        .map(([kind,dow,startTime,endTime,validFrom,validTo,startISO,endISO,timeZone,teacherName]) => ({
+        .map(([kind,dow,startTime,endTime,validFrom,validTo,startISO,endISO,timeZone,teacherName,teacherId]) => ({
           kind, dow: dow? +dow : undefined,
           startTime, endTime,
           validFrom: validFrom? new Date(validFrom): undefined,
           validTo:   validTo?   new Date(validTo):   undefined,
           startISO:  startISO?  new Date(startISO):  undefined,
           endISO:    endISO?    new Date(endISO):    undefined,
-          timeZone, teacherName
+          timeZone, teacherName, teacherId
         }));
     }
     const docs = await TimeSlot.insertMany(rows.filter(r => r && r.kind));
