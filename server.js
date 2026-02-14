@@ -135,8 +135,8 @@ const BookingSchema = new Schema({
   childAge: { type: Number },
   country: { type: String },
   timeZone: { type: String },
-  dateStr: { type: String, required: true },  // e.g. "2025-09-20" – kept for compatibility
-  timeStr: { type: String, required: true },  // e.g. "14:00" – kept for compatibility
+  dateStr: { type: String, required: true },  // legacy, kept for compatibility
+  timeStr: { type: String, required: true },  // legacy, kept for compatibility
   level:   { type: String, required: true },
   status:  { type: String, default: 'Scheduled' }, // Scheduled | Completed | Cancelled | No-Show | Rescheduled
   teacherName: { type: String, default: process.env.TEACHER_NAME || 'Teacher' },
@@ -298,19 +298,11 @@ app.post('/submit', (req, res) => {
       return res.status(400).json({ success: false, message: err.message });
     }
 
-    // Cleanup function to delete temporary directory
     const tmpDir = req.files && req.files.length > 0 ? path.dirname(req.files[0].path) : null;
-    const cleanup = () => {
-      if (tmpDir && tmpDir.startsWith('/tmp')) {
-        fs.rm(tmpDir, { recursive: true, force: true }, () => {});
-      }
-    };
-
     try {
       // Check email configuration first
       if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
         console.error('Email configuration missing - cannot send teacher application');
-        cleanup();
         return res.status(500).json({ success:false, message:'Email service not configured' });
       }
 
@@ -336,11 +328,9 @@ app.post('/submit', (req, res) => {
       const fCV = files['cv'] || files['resume'] || files['cvFile'] || null;
 
       if (!fCV) {
-        cleanup();
         return res.status(400).json({ success: false, message: 'Missing required file: CV' });
       }
       if (!fQ1 && !fQ2 && !fMain) {
-        cleanup();
         return res.status(400).json({ success: false, message: 'Missing audio file (audio, audioQ1 or audioQ2)' });
       }
 
@@ -405,12 +395,15 @@ app.post('/submit', (req, res) => {
         attachments
       });
 
-      cleanup();
       res.status(201).json({ success:true, message:'Application submitted and email sent' });
     } catch (err) {
       console.error('Error submitting application:', err);
-      cleanup();
       res.status(500).json({ success:false, message:'Internal server error', error: err.message });
+    } finally {
+      // Cleanup temporary directory
+      if (tmpDir && tmpDir.startsWith('/tmp')) {
+        fs.rm(tmpDir, { recursive: true, force: true }, () => {});
+      }
     }
   });
 });
@@ -465,9 +458,12 @@ app.get('/api/me', optionalAuth, async (req, res) => {
 
 /* ---------------- Bookings (student) ---------------- */
 
-// Helper to check if a slot is already booked (excluding a specific booking id)
-async function isSlotBooked(dateStr, timeStr, excludeBookingId = null) {
-  const query = { dateStr, timeStr, status: { $in: ['Scheduled', 'Rescheduled'] } };
+// Helper to check if a slot is already booked (excluding a specific booking id) – using start field
+async function isSlotBooked(startDate, excludeBookingId = null) {
+  const query = {
+    start: startDate,
+    status: { $in: ['Scheduled', 'Rescheduled'] }
+  };
   if (excludeBookingId) {
     query._id = { $ne: excludeBookingId };
   }
@@ -483,16 +479,16 @@ app.post('/api/bookings/trial', optionalAuth, async (req, res) => {
 
     const start = new Date(startISO);
     if (isNaN(start)) return res.status(400).json({ success:false, message:'Invalid startISO' });
-    const end = new Date(start.getTime() + 60 * 60 * 1000); // 1 hour later
+    const end = new Date(start.getTime() + 25 * 60 * 1000); // 25 minutes
+
+    // Check if slot already taken
+    if (await isSlotBooked(start)) {
+      return res.status(409).json({ success:false, message:'This time slot is already booked' });
+    }
 
     // Extract dateStr and timeStr from start for legacy fields
     const dateStr = start.toISOString().split('T')[0];
     const timeStr = start.toISOString().split('T')[1].substring(0,5); // "HH:MM"
-
-    // Check if slot already taken (using legacy fields for now, could also check by start date)
-    if (await isSlotBooked(dateStr, timeStr)) {
-      return res.status(409).json({ success:false, message:'This time slot is already booked' });
-    }
 
     let userDoc = null;
     if (req.user && req.user.uid) {
@@ -581,12 +577,12 @@ app.post('/api/book', auth, async (req, res) => {
 
     const start = new Date(startISO);
     if (isNaN(start)) return res.status(400).json({ success:false, message:'Invalid startISO' });
-    const end = new Date(start.getTime() + 60 * 60 * 1000);
+    const end = new Date(start.getTime() + 25 * 60 * 1000); // 25 minutes
     const dateStr = start.toISOString().split('T')[0];
     const timeStr = start.toISOString().split('T')[1].substring(0,5);
 
     // Check if slot already taken
-    if (await isSlotBooked(dateStr, timeStr)) {
+    if (await isSlotBooked(start)) {
       return res.status(409).json({ success:false, message:'This time slot is already booked' });
     }
 
@@ -700,12 +696,12 @@ app.post('/api/bookings/:id/reschedule', auth, async (req, res) => {
     if (!startISO) return res.status(400).json({ success:false, message:'startISO is required' });
     const newStart = new Date(startISO);
     if (isNaN(newStart)) return res.status(400).json({ success:false, message:'Invalid startISO' });
-    const newEnd = new Date(newStart.getTime() + 60 * 60 * 1000);
+    const newEnd = new Date(newStart.getTime() + 25 * 60 * 1000); // 25 minutes
     const newDateStr = newStart.toISOString().split('T')[0];
     const newTimeStr = newStart.toISOString().split('T')[1].substring(0,5);
 
-    // If new date/time provided, check if slot is already taken (excluding current booking)
-    if (await isSlotBooked(newDateStr, newTimeStr, b._id)) {
+    // Check conflict excluding current booking
+    if (await isSlotBooked(newStart, b._id)) {
       return res.status(409).json({ success:false, message:'This time slot is already booked' });
     }
 
@@ -755,12 +751,6 @@ app.post('/api/bookings/:id/reschedule', auth, async (req, res) => {
 });
 
 /* ---------------- Admin APIs ---------------- */
-
-// ... (all admin endpoints remain exactly as in the original file, unchanged)
-// (We keep them as they were; only the Booking schema now includes start/end,
-//  but admin endpoints that update bookings should also update start/end if date/time changes.
-//  For brevity, we only show the modified ones above. In a real scenario we'd update the admin endpoints too,
-//  but the user didn't ask for that, so we leave them as is, assuming they still work with legacy fields.)
 
 // Quick SMTP test endpoint (send to ADMIN_TO)
 app.post('/api/admin/test-email', requireAdmin, async (req, res) => {
@@ -875,7 +865,7 @@ app.patch('/api/admin/bookings/:id/status', requireAdmin, async (req, res) => {
     const newStart = new Date(`${dateStr}T${timeStr}:00`);
     if (!isNaN(newStart)) {
       b.start = newStart;
-      b.end = new Date(newStart.getTime() + 60 * 60 * 1000);
+      b.end = new Date(newStart.getTime() + 25 * 60 * 1000); // 25 minutes
     }
   }
 
@@ -933,7 +923,7 @@ app.post('/api/admin/bookings/create', requireAdmin, async (req, res) => {
       });
     }
     const start = new Date(`${dateStr}T${timeStr}:00`);
-    const end = new Date(start.getTime() + 60 * 60 * 1000);
+    const end = new Date(start.getTime() + 25 * 60 * 1000); // 25 minutes
     const booking = await Booking.create({
       user: user._id,
       email: user.email,
@@ -986,7 +976,7 @@ app.get('/api/schedule', optionalAuth, async (req, res) => {
 
     for (const b of lessons) {
       if (!b.start) continue;
-      const end = b.end || new Date(b.start.getTime() + 60 * 60 * 1000);
+      const end = b.end || new Date(b.start.getTime() + 25 * 60 * 1000);
       addItem(
         'lesson',
         b.level ? `${b.level} Lesson` : 'Lesson',
