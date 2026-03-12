@@ -565,7 +565,7 @@ app.post('/api/bookings/:id/move-to-next-month', auth, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Maximum 2 lessons can be moved to next month' });
     }
 
-    // Cancel the current booking (free up slot)
+    // Cancel the current booking (free up slot) – NO cancellation email is sent here
     booking.status = 'Cancelled';
     await booking.save();
 
@@ -577,7 +577,7 @@ app.post('/api/bookings/:id/move-to-next-month', auth, async (req, res) => {
     }
     await deferred.save();
 
-    // Send notifications
+    // Send specific "moved to next month" notifications (not cancellation)
     await sendEmail({
       to: ADMIN_TO,
       subject: `📅 Lesson moved to next month: ${booking.childName}`,
