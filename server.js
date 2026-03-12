@@ -148,6 +148,16 @@ const BookingSchema = new Schema({
 }, { timestamps: true });
 const Booking = model('Booking', BookingSchema);
 
+// NEW: DeferredCredit model to track how many lessons a student has moved to a specific month
+const DeferredCreditSchema = new Schema({
+  student: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+  month: { type: String, required: true }, // YYYY-MM, e.g. "2025-04"
+  count: { type: Number, default: 0, min: 0, max: 2 } // max 2 per month
+}, { timestamps: true });
+// Unique index ensures one record per student per month
+DeferredCreditSchema.index({ student: 1, month: 1 }, { unique: true });
+const DeferredCredit = model('DeferredCredit', DeferredCreditSchema);
+
 let TimeSlot;
 try { TimeSlot = mongoose.model('TimeSlot'); } catch (e) {
   const TimeSlotSchema = new Schema({
@@ -498,6 +508,107 @@ async function isSlotBooked(start, duration = 25, excludeId = null) {
   return !!existing;
 }
 
+// Helper to get next month key (YYYY-MM)
+function getNextMonthKey(fromDate = new Date()) {
+  const d = new Date(fromDate);
+  d.setMonth(d.getMonth() + 1);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+}
+
+// Helper to get month key from date
+function getMonthKey(date) {
+  return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}`;
+}
+
+// NEW: GET /api/student/deferred?month=YYYY-MM (default next month)
+app.get('/api/student/deferred', auth, async (req, res) => {
+  try {
+    const { month } = req.query;
+    const targetMonth = month || getNextMonthKey();
+    let deferred = await DeferredCredit.findOne({ student: req.user.uid, month: targetMonth });
+    res.json({ success: true, count: deferred ? deferred.count : 0, month: targetMonth });
+  } catch (e) {
+    console.error('Error fetching deferred count:', e);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// NEW: POST /api/bookings/:id/move-to-next-month
+app.post('/api/bookings/:id/move-to-next-month', auth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid booking ID' });
+    }
+
+    const booking = await Booking.findOne({ _id: id, user: req.user.uid });
+    if (!booking) {
+      return res.status(404).json({ success: false, message: 'Booking not found' });
+    }
+
+    // Ensure it's upcoming and more than 8 hours away
+    const now = Date.now();
+    const lessonTime = booking.start.getTime();
+    const hoursUntil = (lessonTime - now) / (1000 * 60 * 60);
+    if (hoursUntil < 8) {
+      return res.status(400).json({ success: false, message: 'Cannot move a lesson that starts in less than 8 hours' });
+    }
+    if (booking.status !== 'Scheduled' && booking.status !== 'Rescheduled') {
+      return res.status(400).json({ success: false, message: 'Only scheduled lessons can be moved' });
+    }
+
+    const nextMonth = getNextMonthKey();
+    // Check limit
+    let deferred = await DeferredCredit.findOne({ student: req.user.uid, month: nextMonth });
+    const currentCount = deferred ? deferred.count : 0;
+    if (currentCount >= 2) {
+      return res.status(400).json({ success: false, message: 'Maximum 2 lessons can be moved to next month' });
+    }
+
+    // Cancel the current booking (free up slot)
+    booking.status = 'Cancelled';
+    await booking.save();
+
+    // Increment deferred count
+    if (!deferred) {
+      deferred = new DeferredCredit({ student: req.user.uid, month: nextMonth, count: 1 });
+    } else {
+      deferred.count += 1;
+    }
+    await deferred.save();
+
+    // Send notifications
+    await sendEmail({
+      to: ADMIN_TO,
+      subject: `📅 Lesson moved to next month: ${booking.childName}`,
+      html: `
+        <h2>Lesson Deferred</h2>
+        <p><strong>Student:</strong> ${booking.childName} (${booking.parentName})</p>
+        <p><strong>Original time:</strong> ${booking.dateStr} ${booking.timeStr}</p>
+        <p><strong>Moved to month:</strong> ${nextMonth}</p>
+        <p>This student now has ${deferred.count}/2 deferred credits for that month.</p>
+      `
+    });
+
+    await sendEmail({
+      to: booking.email,
+      subject: 'Your lesson has been moved to next month',
+      html: `
+        <h2>Lesson moved</h2>
+        <p>Dear ${booking.parentName},</p>
+        <p>The lesson for <strong>${booking.childName}</strong> originally scheduled for ${booking.dateStr} at ${booking.timeStr} has been moved to next month (${nextMonth}).</p>
+        <p>You can now book a new lesson in ${nextMonth} using your deferred credit. You have <strong>${deferred.count}/2</strong> deferred lessons for next month.</p>
+        <p>Please log in to your dashboard to schedule your deferred lesson.</p>
+      `
+    });
+
+    res.json({ success: true, deferredCount: deferred.count });
+  } catch (e) {
+    console.error('Move to next month error:', e);
+    res.status(500).json({ success: false, message: 'Failed to move lesson' });
+  }
+});
+
 // TRIAL booking – now accepts startISO
 app.post('/api/bookings/trial', optionalAuth, async (req, res) => {
   try {
@@ -595,10 +706,10 @@ app.post('/api/bookings/trial', optionalAuth, async (req, res) => {
   }
 });
 
-// Regular booking endpoint (for schedule lessons) – also updated to accept startISO
+// Regular booking endpoint (for schedule lessons) – also updated to accept startISO and optional useDeferred
 app.post('/api/book', auth, async (req, res) => {
   try {
-    const { email, childName, parentName, childAge, country, timeZone, level, phone, startISO } = req.body;
+    const { email, childName, parentName, childAge, country, timeZone, level, phone, startISO, useDeferred } = req.body;
     if (!startISO || !childName || !parentName || !email || !level) {
       return res.status(400).json({ success:false, message:'Missing required fields (startISO, childName, parentName, email, level)' });
     }
@@ -612,6 +723,20 @@ app.post('/api/book', auth, async (req, res) => {
     // Check if slot already taken
     if (await isSlotBooked(start)) {
       return res.status(409).json({ success:false, message:'This time slot is already booked' });
+    }
+
+    // Handle deferred credit if requested
+    const monthKey = getMonthKey(start);
+    let deferredUsed = false;
+    if (useDeferred) {
+      const deferred = await DeferredCredit.findOne({ student: req.user.uid, month: monthKey });
+      if (deferred && deferred.count > 0) {
+        deferred.count -= 1;
+        await deferred.save();
+        deferredUsed = true;
+      } else {
+        return res.status(400).json({ success: false, message: 'No deferred credits available for this month' });
+      }
     }
 
     const booking = await Booking.create({
@@ -628,7 +753,7 @@ app.post('/api/book', auth, async (req, res) => {
     // Send to admin
     await sendEmail({
       to: ADMIN_TO,
-      subject: `🗓️ New lesson booking: ${childName} (${dateStr} ${timeStr})`,
+      subject: `🗓️ New lesson booking: ${childName} (${dateStr} ${timeStr})${deferredUsed ? ' [Deferred credit used]' : ''}`,
       html: `
         <h2>New booking</h2>
         <p><strong>Child:</strong> ${childName}</p>
@@ -638,6 +763,7 @@ app.post('/api/book', auth, async (req, res) => {
         <p><strong>Level:</strong> ${level}</p>
         <p><strong>Date & Time:</strong> ${dateStr} ${timeStr} (${timeZone||'—'})</p>
         <p><strong>Country:</strong> ${country||'—'}</p>
+        ${deferredUsed ? '<p><strong>Note:</strong> This booking used a deferred credit.</p>' : ''}
       `
     });
 
@@ -653,11 +779,12 @@ app.post('/api/book', auth, async (req, res) => {
         <p><strong>Time:</strong> ${timeStr} (${timeZone||''})</p>
         <p><strong>Level:</strong> ${level}</p>
         <p><strong>Teacher:</strong> ${process.env.TEACHER_NAME || 'Teacher'}</p>
+        ${deferredUsed ? '<p><strong>Note:</strong> This booking used a deferred credit from a previous month.</p>' : ''}
         <p>We look forward to seeing you!</p>
       `
     });
 
-    res.json({ success:true, booking });
+    res.json({ success:true, booking, deferredUsed });
   } catch (e) {
     console.error('Book error:', e);
     res.status(500).json({ success:false, message:'Booking failed' });
