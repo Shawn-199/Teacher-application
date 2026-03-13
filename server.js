@@ -1075,6 +1075,75 @@ app.get('/api/admin/stats', requireAdmin, async (_req, res) => {
   });
 });
 
+// ===== Admin Deferred Credits =====
+
+// GET /api/admin/deferred — list all deferred credits with student info
+app.get('/api/admin/deferred', requireAdmin, async (req, res) => {
+  try {
+    const deferred = await DeferredCredit.find({})
+      .populate('student', 'email firstName lastName')
+      .sort({ month: -1, createdAt: -1 })
+      .lean();
+    res.json({ success: true, deferred });
+  } catch (e) {
+    console.error('Error fetching deferred credits:', e);
+    res.status(500).json({ success: false, message: 'Failed to fetch deferred credits' });
+  }
+});
+
+// POST /api/admin/deferred — create or update a deferred credit
+app.post('/api/admin/deferred', requireAdmin, async (req, res) => {
+  try {
+    const { studentEmail, month, count } = req.body;
+    if (!studentEmail || !month || count === undefined) {
+      return res.status(400).json({ success: false, message: 'studentEmail, month, count required' });
+    }
+    const student = await User.findOne({ email: studentEmail.toLowerCase() });
+    if (!student) {
+      return res.status(404).json({ success: false, message: 'Student not found' });
+    }
+    const deferred = await DeferredCredit.findOneAndUpdate(
+      { student: student._id, month },
+      { count: Math.min(count, 2) },
+      { upsert: true, new: true }
+    );
+    res.json({ success: true, deferred });
+  } catch (e) {
+    console.error('Error creating deferred credit:', e);
+    res.status(500).json({ success: false, message: 'Failed to create deferred credit' });
+  }
+});
+
+// PATCH /api/admin/deferred/:id — update count
+app.patch('/api/admin/deferred/:id', requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { count } = req.body;
+    if (count === undefined || count < 0 || count > 2) {
+      return res.status(400).json({ success: false, message: 'count must be between 0 and 2' });
+    }
+    const deferred = await DeferredCredit.findByIdAndUpdate(id, { count }, { new: true });
+    if (!deferred) return res.status(404).json({ success: false, message: 'Not found' });
+    res.json({ success: true, deferred });
+  } catch (e) {
+    console.error('Error updating deferred credit:', e);
+    res.status(500).json({ success: false, message: 'Failed to update' });
+  }
+});
+
+// DELETE /api/admin/deferred/:id
+app.delete('/api/admin/deferred/:id', requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await DeferredCredit.findByIdAndDelete(id);
+    if (!result) return res.status(404).json({ success: false, message: 'Not found' });
+    res.json({ success: true });
+  } catch (e) {
+    console.error('Error deleting deferred credit:', e);
+    res.status(500).json({ success: false, message: 'Failed to delete' });
+  }
+});
+
 /* ---------------- NEW: Admin create lesson ---------------- */
 // Fixed teacher timezone offset (Asia/Dushanbe, UTC+5)
 const TEACHER_TZ_OFFSET = 5; // hours ahead of UTC
