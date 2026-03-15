@@ -280,7 +280,10 @@ async function requireAdmin(req, res, next) {
     const payload = jwt.verify(h.slice(7), process.env.JWT_SECRET);
     const u = await User.findById(payload.uid).select('_id email role');
     if (!u) return res.status(401).json({ success:false, message:'User not found' });
-    if (!['admin','manager'].includes(u.role)) return res.status(403).json({ success:false, message:'Admin or manager only' });
+    if (!['admin','manager'].includes(u.role)) {
+      console.warn(`Access denied for user ${u.email} with role ${u.role}`);
+      return res.status(403).json({ success:false, message:'Admin or manager only' });
+    }
     req.admin = { id: u._id, email: u.email, role: u.role };
     next();
   } catch (e) {
@@ -1080,6 +1083,7 @@ app.get('/api/admin/stats', requireAdmin, async (_req, res) => {
 // GET /api/admin/deferred — list all deferred credits with student info
 app.get('/api/admin/deferred', requireAdmin, async (req, res) => {
   try {
+    console.log('Fetching deferred credits for admin:', req.admin?.email);
     const deferred = await DeferredCredit.find({})
       .populate('student', 'email firstName lastName')
       .sort({ month: -1, createdAt: -1 })
@@ -1095,6 +1099,7 @@ app.get('/api/admin/deferred', requireAdmin, async (req, res) => {
 app.post('/api/admin/deferred', requireAdmin, async (req, res) => {
   try {
     const { studentEmail, month, count } = req.body;
+    console.log('Creating deferred credit for', studentEmail, month, count);
     if (!studentEmail || !month || count === undefined) {
       return res.status(400).json({ success: false, message: 'studentEmail, month, count required' });
     }
@@ -1119,6 +1124,7 @@ app.patch('/api/admin/deferred/:id', requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const { count } = req.body;
+    console.log('Updating deferred credit', id, count);
     if (count === undefined || count < 0 || count > 2) {
       return res.status(400).json({ success: false, message: 'count must be between 0 and 2' });
     }
@@ -1135,6 +1141,7 @@ app.patch('/api/admin/deferred/:id', requireAdmin, async (req, res) => {
 app.delete('/api/admin/deferred/:id', requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
+    console.log('Deleting deferred credit', id);
     const result = await DeferredCredit.findByIdAndDelete(id);
     if (!result) return res.status(404).json({ success: false, message: 'Not found' });
     res.json({ success: true });
@@ -1151,6 +1158,7 @@ const TEACHER_TZ_OFFSET = 5; // hours ahead of UTC
 app.post('/api/admin/bookings/create', requireAdmin, async (req, res) => {
   try {
     const { email, childName, parentName, childAge, country, timeZone, dateStr, timeStr, level, teacherName, teacherId } = req.body || {};
+    console.log('Creating lesson for', email, childName);
     if (!email || !childName || !parentName || !dateStr || !timeStr || !level) {
       return res.status(400).json({ success:false, message:'Missing required fields: email, childName, parentName, dateStr, timeStr, level' });
     }
