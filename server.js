@@ -280,6 +280,10 @@ async function requireAdmin(req, res, next) {
     const payload = jwt.verify(h.slice(7), process.env.JWT_SECRET);
     const u = await User.findById(payload.uid).select('_id email role');
     if (!u) return res.status(401).json({ success:false, message:'User not found' });
+    
+    // 🔍 Debug log – check the user's role
+    console.log(`Admin check: user ${u.email} has role "${u.role}"`);
+
     if (!['admin','manager'].includes(u.role)) {
       console.warn(`Access denied for user ${u.email} with role ${u.role}`);
       return res.status(403).json({ success:false, message:'Admin or manager only' });
