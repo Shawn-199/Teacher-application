@@ -281,17 +281,14 @@ async function requireAdmin(req, res, next) {
     const u = await User.findById(payload.uid).select('_id email role');
     if (!u) return res.status(401).json({ success:false, message:'User not found' });
     
-    // 🔍 Debug log – check the user's role
-    console.log(`Admin check: user ${u.email} has role "${u.role}"`);
-
-    if (!['admin','manager'].includes(u.role)) {
-      console.warn(`Access denied for user ${u.email} with role ${u.role}`);
-      return res.status(403).json({ success:false, message:'Admin or manager only' });
+    // БЕЗОГОВОРОЧНЫЙ ДОСТУП ДЛЯ ТВОЕЙ ПОЧТЫ
+    if (u.email === 'shakhrom.azimov99@gmail.com' || ['admin','manager'].includes(u.role)) {
+      req.admin = { id: u._id, email: u.email, role: 'admin' };
+      return next();
     }
-    req.admin = { id: u._id, email: u.email, role: u.role };
-    next();
+
+    return res.status(403).json({ success:false, message:'Admin or manager only' });
   } catch (e) {
-    console.error('requireAdmin error:', e);
     return res.status(401).json({ success:false, message:'Invalid token' });
   }
 }
@@ -300,20 +297,35 @@ async function requireAdmin(req, res, next) {
 async function requireTeacher(req, res, next) {
   try {
     const h = req.headers.authorization || '';
-    if (!h.startsWith('Bearer ')) return res.status(401).json({ success:false, message:'Missing token' });
+    if (!h.startsWith('Bearer ')) {
+        return res.status(401).json({ success: false, message: 'Missing token' });
+    }
+    
+    // Расшифровываем токен
     const payload = jwt.verify(h.slice(7), process.env.JWT_SECRET);
     const u = await User.findById(payload.uid).select('_id email role');
-    if (!u) return res.status(401).json({ success:false, message:'User not found' });
-    if (!['admin','manager','teacher'].includes(u.role)) {
-      return res.status(403).json({ success:false, message:'Teacher or admin only' });
+    if (!u) {
+        return res.status(401).json({ success: false, message: 'User not found' });
     }
-    req.teacher = { id: u._id, email: u.email, role: u.role };
-    next();
+
+    // ГЛАВНОЕ ИЗМЕНЕНИЕ ЗДЕСЬ:
+    // Пропускаем, если это твоя почта (владелец), ИЛИ если роль = admin, ИЛИ если роль = teacher
+    if (
+      u.email === 'shakhrom.azimov99@gmail.com' || 
+      ['admin', 'teacher', 'manager'].includes(u.role)
+    ) {
+      // Сохраняем данные пользователя в объекте запроса для дальнейшего использования
+      req.user = { id: u._id, email: u.email, role: u.role }; 
+      return next(); // Доступ разрешен, идем дальше
+    }
+
+    // Если ничего из вышеперечисленного не совпало — блокируем доступ
+    return res.status(403).json({ success: false, message: 'Teacher access required' });
+    
   } catch (e) {
-    return res.status(401).json({ success:false, message:'Invalid token' });
+    return res.status(401).json({ success: false, message: 'Invalid token' });
   }
 }
-
 /* ---------------- Health ---------------- */
 app.get('/health', (req, res) => res.json({ ok: true }));
 
@@ -902,7 +914,7 @@ app.post('/api/bookings/:id/reschedule', auth, async (req, res) => {
         <p>The lesson for <strong>${b.childName}</strong> has been moved to:</p>
         <p><strong>Date:</strong> ${b.dateStr}</p>
         <p><strong>Time:</strong> ${b.timeStr} (${b.timeZone})</p>
-        <p>If this was a mistake, please contact us at grand.english.courses@gmail.com </p>
+        <p>If this was a mistake, please contact us at info@grandenglishcourses.com </p>
       `
     });
 
