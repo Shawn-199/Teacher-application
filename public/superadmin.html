@@ -290,11 +290,44 @@ document.addEventListener('DOMContentLoaded', function(){
     if(!data) return;
     const tbody = document.getElementById('usersTbody'); tbody.innerHTML = '';
     (data.users || []).forEach(u => {
-      tbody.innerHTML += `<tr><td>${u.email}</td><td>${u.firstName||''} ${u.lastName||''}</td><td><b>${u.role}</b></td>
-        <td><button class="btn danger" onclick="deleteUser('${u._id}')">Del</button></td></tr>`;
+      tbody.innerHTML += `<tr>
+        <td>${u.email}</td>
+        <td>${u.firstName||''} ${u.lastName||''}</td>
+        <td>
+          <select id="role_${u._id}" style="padding:4px; border-radius:4px;">
+            <option value="student" ${u.role === 'student' ? 'selected' : ''}>Student</option>
+            <option value="teacher" ${u.role === 'teacher' ? 'selected' : ''}>Teacher</option>
+            <option value="manager" ${u.role === 'manager' ? 'selected' : ''}>Manager</option>
+            <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>Admin</option>
+          </select>
+        </td>
+        <td>
+          <button class="btn primary" onclick="updateRole('${u._id}')">Save Role</button>
+          <button class="btn danger" onclick="deleteUser('${u._id}')">Del</button>
+        </td>
+      </tr>`;
     });
   }
-  window.deleteUser = async (id) => { if(confirm('Удалить?')) { await apiCall(`${API_BASE}/api/admin/users/${id}`, { method: 'DELETE', headers: getAuthHeaders() }); loadUsers(); } };
+
+  window.updateRole = async (id) => {
+    const newRole = document.getElementById(`role_${id}`).value;
+    try {
+      await apiCall(`${API_BASE}/api/admin/users/${id}`, { 
+        method: 'PATCH', 
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({ role: newRole })
+      });
+      alert('Роль успешно обновлена!');
+      loadUsers();
+    } catch(e) {}
+  };
+
+  window.deleteUser = async (id) => { 
+    if(confirm('Точно удалить этого пользователя навсегда?')) { 
+      await apiCall(`${API_BASE}/api/admin/users/${id}`, { method: 'DELETE', headers: getAuthHeaders() }); 
+      loadUsers(); 
+    } 
+  };
 
   // --- СЛОТЫ ---
   const slotsModal = document.getElementById('slotsModal');
