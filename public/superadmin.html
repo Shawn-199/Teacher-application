@@ -186,11 +186,33 @@
 document.addEventListener('DOMContentLoaded', function(){
   const API_BASE = window.location.origin;
 
-  // Безопасное получение токена без ошибок "null"
+  // Умный поиск токена (Ищейка)
   const getToken = () => {
-    const t = localStorage.getItem('token') || localStorage.getItem('gec_token') || localStorage.getItem('admin_token') || '';
-    if (t === 'null' || t === 'undefined') return '';
-    return t;
+    // 1. Сначала проверяем самые популярные названия
+    const commonKeys = ['token', 'gec_token', 'admin_token', 'jwt', 'auth_token', 'accessToken', 'user'];
+    for (let k of commonKeys) {
+      let val = localStorage.getItem(k);
+      // Если токен сохранен в виде JSON-объекта
+      if (val && val.includes('eyJ')) {
+        if (val.startsWith('eyJ')) return val; // Чистый токен
+        try {
+          const parsed = JSON.parse(val);
+          if (parsed.token) return parsed.token;
+        } catch(e) {}
+      }
+      if (val && val !== 'null' && val !== 'undefined') return val;
+    }
+    
+    // 2. Если по именам не нашли, сканируем вообще всю память браузера на наличие JWT-токена
+    for (let i = 0; i < localStorage.length; i++) {
+      let key = localStorage.key(i);
+      let val = localStorage.getItem(key);
+      if (typeof val === 'string' && val.startsWith('eyJ') && val.split('.').length === 3) {
+        // Мы нашли скрытый токен!
+        return val;
+      }
+    }
+    return ''; // Токена реально нет
   };
   
   const setToken = (token) => { 
@@ -222,13 +244,14 @@ document.addEventListener('DOMContentLoaded', function(){
   
   document.getElementById('loginCloseBtn').onclick = () => loginModal.style.display = 'none';
   
+  // Автоматическая проверка каждые полсекунды
   setInterval(() => {
     if (!getToken()) {
       if (loginBtn) loginBtn.style.display = 'block';
     } else {
       if (loginBtn) loginBtn.style.display = 'none';
     }
-  }, 1000);
+  }, 500);
 
   if (loginBtn) {
     loginBtn.onclick = () => loginModal.style.display = 'block';
