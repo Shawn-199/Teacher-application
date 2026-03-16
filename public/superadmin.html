@@ -1,8 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Grand English Super Admin</title>
+<style>
+  body { margin: 0; padding: 0; font-family: sans-serif; overflow: hidden; background: #f8fafc; }
+  .iframe-wrapper { height: 100vh; width: 100%; border: 0; }
+  
+  #lessonLaunchBtn, #reviewsLaunchBtn, #slotsLaunchBtn, #usersLaunchBtn, #deferredLaunchBtn {
+    position: fixed; right: 16px; z-index: 99999;
+    color: #fff; border: none; border-radius: 12px;
+    padding: 10px 14px; box-shadow: 0 10px 22px rgba(0,0,0,.18);
+    cursor: pointer; font-weight: 800; font-family: inherit;
+    transition: transform 0.2s;
+  }
+  #lessonLaunchBtn:hover, #reviewsLaunchBtn:hover, #slotsLaunchBtn:hover, #usersLaunchBtn:hover, #deferredLaunchBtn:hover {
+    transform: scale(1.05);
+  }
+
+  /* Позиции кнопок */
+  #slotsLaunchBtn   { bottom: 16px;  background: #111827; }
+  #lessonLaunchBtn  { bottom: 66px;  background: #2563eb; }
+  #reviewsLaunchBtn { bottom: 116px; background: #7C3AED; }
+  #usersLaunchBtn   { bottom: 166px; background: #059669; }
+  #deferredLaunchBtn{ bottom: 216px; background: #B45309; }
+
+  /* Кнопка входа, если токена нет */
+  #loginBtn {
+    position: fixed; top: 16px; right: 16px; z-index: 100000; display: none;
+    background: #ef4444; color: white; border: none; border-radius: 30px; 
+    padding: 10px 20px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  }
+
+  .modal-overlay {
+    position: fixed; inset: 0; z-index: 99998; display: none;
+    background: rgba(0,0,0,.5); backdrop-filter: blur(4px); overflow-y: auto; padding: 20px;
+  }
+  .panel { max-width: 980px; margin: 5vh auto; background: #fff; border-radius: 14px; box-shadow: 0 20px 40px rgba(0,0,0,.22); overflow: hidden; max-height: 90vh; display: flex; flex-direction: column; }
+  .panel-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid #e5e7eb; background: #fff; }
+  .panel-body { padding: 18px; overflow-y: auto; flex: 1; }
+  .panel-title { font-weight: 900; font-size: 1.2em; color: #111827; }
+  .controls { display: flex; gap: 8px; }
+  .btn { padding: 8px 14px; border-radius: 8px; border: 1px solid #d1d5db; background: #fff; cursor: pointer; font-size: 13px; font-weight: 600; }
+  .btn.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+  .btn.danger { background: #ef4444; color: #fff; border-color: #ef4444; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; padding: 12px 8px; border-bottom: 2px solid #e5e7eb; background: #f8fafc; position: sticky; top: -18px; color: #4b5563; z-index: 1; }
+  td { padding: 12px 8px; border-bottom: 1px solid #f1f5f9; color: #1f2937; }
+  #slotEditor { display: none; margin-bottom: 20px; padding: 15px; background: #f8fafc; border-radius: 10px; border: 1px solid #e5e7eb; }
+  .row-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; align-items: end; }
+  .row-grid label { font-size: 12px; color: #4b5563; display: block; margin-bottom: 4px; font-weight: 600; }
+  input, select { width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; box-sizing: border-box; }
+</style>
+</head>
+<body>
+
+<div class="iframe-wrapper">
+  <iframe id="adminIframe" src="/admin-ui/admin.html" style="width:100%; height:100%; border:0;"></iframe>
+</div>
+
+<button id="loginBtn">🔐 Войти в систему</button>
+
+<button id="lessonLaunchBtn">Create Lesson</button>
+<button id="reviewsLaunchBtn">Manage Reviews</button>
+<button id="usersLaunchBtn">Manage Users</button>
+<button id="deferredLaunchBtn">Deferred Credits</button>
+<button id="slotsLaunchBtn">Manage Slots</button>
+
+<div id="loginModal" class="modal-overlay">
+  <div class="panel" style="max-width: 400px;">
+    <div class="panel-head">
+      <div class="panel-title">Admin Login</div>
+      <button class="btn" id="loginCloseBtn">Close</button>
+    </div>
+    <div class="panel-body">
+      <form id="adminLoginForm">
+        <div style="margin-bottom:12px">
+          <label style="font-weight:600; display:block; margin-bottom:4px">Email</label>
+          <input type="email" id="loginEmail" required>
+        </div>
+        <div style="margin-bottom:12px">
+          <label style="font-weight:600; display:block; margin-bottom:4px">Password</label>
+          <input type="password" id="loginPassword" required>
+        </div>
+        <button type="submit" class="btn primary" style="width:100%">Log in</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div id="usersModal" class="modal-overlay">
+  <div class="panel">
+    <div class="panel-head">
+      <div class="panel-title">Manage Users</div>
+      <div class="controls"><button class="btn" id="usersReload">Reload</button><button class="btn danger" id="usersClose">Close</button></div>
+    </div>
+    <div class="panel-body">
+      <table><thead><tr><th>Email</th><th>Name</th><th>Role</th><th>Actions</th></tr></thead><tbody id="usersTbody"></tbody></table>
+    </div>
+  </div>
+</div>
+
+<div id="slotsModal" class="modal-overlay">
+  <div class="panel">
+    <div class="panel-head">
+      <div class="panel-title">Manage Slots</div>
+      <div class="controls"><button class="btn" id="slotAdd">Add slot</button><button class="btn" id="slotReload">Reload</button><button class="btn danger" id="slotsClose">Close</button></div>
+    </div>
+    <div class="panel-body">
+      <div id="slotEditor">
+        <div class="row-grid">
+          <div><label>Kind</label><select id="f_kind"><option value="recurring">Recurring</option><option value="oneoff">One-off</option></select></div>
+          <div class="grp-rec"><label>DOW (0-6)</label><input id="f_dow" type="number" min="0" max="6"></div>
+          <div class="grp-rec"><label>Start (HH:mm)</label><input id="f_startTime" type="time"></div>
+          <div class="grp-rec"><label>End (HH:mm)</label><input id="f_endTime" type="time"></div>
+          <div class="grp-one" style="display:none"><label>Start ISO</label><input id="f_startISO" type="datetime-local"></div>
+          <div class="grp-one" style="display:none"><label>End ISO</label><input id="f_endISO" type="datetime-local"></div>
+          <div><label>Teacher Name</label><input id="f_teacherName" type="text" value="Teacher"></div>
+          <div><label>Teacher ID</label><input id="f_teacherId" type="text"></div>
+          <div><label>Active</label><select id="f_isActive"><option value="true">true</option><option value="false">false</option></select></div>
+          <div style="align-self:end"><button class="btn primary" id="f_saveBtn">Save</button> <button class="btn" id="f_cancelBtn">Cancel</button></div>
+        </div>
+      </div>
+      <table><thead><tr><th>kind</th><th>when</th><th>teacher</th><th>active</th><th>actions</th></tr></thead><tbody id="slotsTbody"></tbody></table>
+    </div>
+  </div>
+</div>
+
+<div id="lessonModal" class="modal-overlay">
+  <div class="panel" style="max-width:800px;">
+    <div class="panel-head">
+      <div class="panel-title">Create Lesson</div>
+      <button class="btn danger" id="lessonCloseBtn">Close</button>
+    </div>
+    <div class="panel-body">
+      <div class="row-grid" style="grid-template-columns: repeat(2, 1fr);">
+        <div><label>Student Email</label><input id="L_email" type="email"></div>
+        <div><label>Child Name</label><input id="L_child" type="text"></div>
+        <div><label>Parent Name</label><input id="L_parent" type="text"></div>
+        <div><label>Level</label><input id="L_level" type="text"></div>
+        <div><label>Date</label><input id="L_date" type="date"></div>
+        <div><label>Time</label><input id="L_time" type="time"></div>
+        <div><label>Teacher Name</label><input id="L_teacher" type="text" value="Teacher"></div>
+        <div><label>Teacher ID</label><input id="L_teacherId" type="text"></div>
+      </div>
+      <button class="btn primary" id="L_submit" style="margin-top:15px; width:100%">Create</button>
+    </div>
+  </div>
+</div>
+
+<div id="reviewsModal" class="modal-overlay">
+  <div class="panel">
+    <div class="panel-head">
+      <div class="panel-title">Student Reviews</div>
+      <button class="btn danger" id="reviewsCloseBtn">Close</button>
+    </div>
+    <div class="panel-body">
+      <table><thead><tr><th>Date</th><th>Student</th><th>Review</th><th>Status</th><th>Action</th></tr></thead><tbody id="reviewsTableBody"></tbody></table>
+    </div>
+  </div>
+</div>
+
+<div id="deferredModal" class="modal-overlay">
+  <div class="panel">
+    <div class="panel-head">
+      <div class="panel-title">Manage Deferred Credits</div>
+      <div class="controls"><button class="btn" id="deferredAddBtn">Add Credit</button><button class="btn" id="deferredReloadBtn">Reload</button><button class="btn danger" id="deferredCloseBtn">Close</button></div>
+    </div>
+    <div class="panel-body">
+      <div id="deferredEditor" style="display:none; background:#f8fafc; padding:15px; border-radius:10px; margin-bottom:20px; border: 1px solid #e5e7eb;">
+        <div class="row-grid" style="grid-template-columns: 1fr 1fr 80px auto;">
+          <div><label>Student Email</label><input id="def_email" type="email"></div>
+          <div><label>Month (YYYY-MM)</label><input id="def_month" type="month"></div>
+          <div><label>Count</label><input id="def_count" type="number" min="0" max="2" value="1"></div>
+          <div style="align-self:end"><button class="btn primary" id="def_saveBtn">Save</button> <button class="btn" id="def_cancelBtn">Cancel</button></div>
+        </div>
+      </div>
+      <table><thead><tr><th>Student</th><th>Email</th><th>Month</th><th>Count</th><th>Actions</th></tr></thead><tbody id="deferredTbody"></tbody></table>
+    </div>
+  </div>
+</div>
+
 <script>
 document.addEventListener('DOMContentLoaded', function(){
   const API_BASE = window.location.origin;
 
-  // Ищем токен. Добавлена защита от кривых сохранений (null/undefined)
+  // Безопасное получение токена без ошибок "null"
   const getToken = () => {
     const t = localStorage.getItem('token') || localStorage.getItem('gec_token') || localStorage.getItem('admin_token') || '';
     if (t === 'null' || t === 'undefined') return '';
@@ -36,10 +220,8 @@ document.addEventListener('DOMContentLoaded', function(){
   const loginModal = document.getElementById('loginModal');
   const loginBtn = document.getElementById('loginBtn');
   
-  // Кнопка закрытия логина
   document.getElementById('loginCloseBtn').onclick = () => loginModal.style.display = 'none';
   
-  // Автоматическая проверка: если нет токена - показываем кнопку входа
   setInterval(() => {
     if (!getToken()) {
       if (loginBtn) loginBtn.style.display = 'block';
@@ -52,7 +234,6 @@ document.addEventListener('DOMContentLoaded', function(){
     loginBtn.onclick = () => loginModal.style.display = 'block';
   }
 
-  // Обработка формы входа
   document.getElementById('adminLoginForm').onsubmit = async (e) => {
     e.preventDefault();
     const email = document.getElementById('loginEmail').value;
@@ -76,7 +257,7 @@ document.addEventListener('DOMContentLoaded', function(){
   const usersModal = document.getElementById('usersModal');
   document.getElementById('usersLaunchBtn').onclick = () => { 
     if(getToken()){ usersModal.style.display='block'; loadUsers(); } 
-    else { loginModal.style.display='block'; } // Открываем логин, если нет токена
+    else { loginModal.style.display='block'; }
   };
   document.getElementById('usersClose').onclick = () => usersModal.style.display='none';
   document.getElementById('usersReload').onclick = loadUsers;
@@ -202,3 +383,5 @@ document.addEventListener('DOMContentLoaded', function(){
   window.deleteDeferred = async (id) => { if (confirm('Удалить?')) { await apiCall(`${API_BASE}/api/admin/deferred/${id}`, { method: 'DELETE', headers: getAuthHeaders() }); loadDeferred(); } };
 });
 </script>
+</body>
+</html>
