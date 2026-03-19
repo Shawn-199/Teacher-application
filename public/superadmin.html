@@ -63,6 +63,7 @@
 <button id="loginBtn">🔐 Войти в систему</button>
 
 <button id="lessonLaunchBtn">Create Lesson</button>
+<button id="assignLaunchBtn" style="bottom: 116px; background: #8b5cf6;">Ученики и Учителя</button>
 <button id="reviewsLaunchBtn">Manage Reviews</button>
 <button id="usersLaunchBtn">Manage Users</button>
 <button id="deferredLaunchBtn">Deferred Credits</button>
@@ -439,5 +440,85 @@ document.addEventListener('DOMContentLoaded', function(){
   window.deleteDeferred = async (id) => { if (confirm('Удалить?')) { await apiCall(`${API_BASE}/api/admin/deferred/${id}`, { method: 'DELETE', headers: getAuthHeaders() }); loadDeferred(); } };
 });
 </script>
+
+<div id="assignModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:100000; align-items:center; justify-content:center;">
+  <div style="background:#fff; width:90%; max-width:800px; max-height:80vh; border-radius:12px; padding:20px; overflow-y:auto; position:relative;">
+    <button onclick="document.getElementById('assignModal').style.display='none'" style="position:absolute; right:20px; top:20px; background:red; color:white; border:none; padding:8px 12px; border-radius:8px; cursor:pointer;">Закрыть</button>
+    
+    <h2>Привязка Студентов к Преподавателям</h2>
+    <p style="color:#666;">Выберите преподавателя из выпадающего списка напротив каждого студента. Сохранение происходит автоматически.</p>
+    
+    <table style="width:100%; text-align:left; border-collapse:collapse; margin-top:16px;">
+      <thead>
+        <tr style="border-bottom:2px solid #eee;">
+          <th style="padding:10px;">Студент</th>
+          <th style="padding:10px;">Email</th>
+          <th style="padding:10px;">Текущий Преподаватель</th>
+        </tr>
+      </thead>
+      <tbody id="assignTbody">
+        </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+document.getElementById('assignLaunchBtn').onclick = async () => {
+  document.getElementById('assignModal').style.display = 'flex';
+  document.getElementById('assignTbody').innerHTML = '<tr><td colspan="3">Загрузка...</td></tr>';
+  
+  try {
+    const res = await apiCall(`${API_BASE}/api/admin/assignments`, { headers: getAuthHeaders() });
+    if (!res || !res.success) return;
+    
+    let html = '';
+    // Генерируем опции для select (список всех учителей)
+    let teacherOptions = `<option value="none">-- Без преподавателя --</option>`;
+    res.teachers.forEach(t => {
+      teacherOptions += `<option value="${t._id}">${t.firstName} ${t.lastName} (${t.email})</option>`;
+    });
+
+    res.students.forEach(s => {
+      // Проверяем, кто назначен сейчас
+      const currentTeacherId = s.assignedTeacher ? s.assignedTeacher._id : 'none';
+      
+      html += `
+        <tr style="border-bottom:1px solid #eee;">
+          <td style="padding:10px;">${s.firstName || 'Без имени'} ${s.lastName || ''}</td>
+          <td style="padding:10px;">${s.email}</td>
+          <td style="padding:10px;">
+            <select class="teacher-select" data-student-id="${s._id}" style="padding:8px; border-radius:6px; width:100%; border:1px solid #ccc;">
+              ${teacherOptions.replace(`value="${currentTeacherId}"`, `value="${currentTeacherId}" selected`)}
+            </select>
+          </td>
+        </tr>
+      `;
+    });
+    
+    document.getElementById('assignTbody').innerHTML = html;
+
+    // Вешаем слушатель на изменения: если админ выбрал другого учителя, сразу сохраняем в базу
+    document.querySelectorAll('.teacher-select').forEach(select => {
+      select.addEventListener('change', async (e) => {
+        const studentId = e.target.getAttribute('data-student-id');
+        const teacherId = e.target.value;
+        e.target.style.background = '#fef3c7'; // Желтая подсветка при сохранении
+        
+        await apiCall(`${API_BASE}/api/admin/assignments/${studentId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+          body: JSON.stringify({ teacherId })
+        });
+        
+        e.target.style.background = '#d1fae5'; // Зеленая подсветка после успеха
+        setTimeout(() => e.target.style.background = '', 1500);
+      });
+    });
+
+  } catch (err) {
+    document.getElementById('assignTbody').innerHTML = '<tr><td colspan="3" style="color:red;">Ошибка загрузки</td></tr>';
+  }
+};
+</script> 
 </body>
 </html>

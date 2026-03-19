@@ -1645,6 +1645,31 @@ app.delete('/api/admin/reviews/:id', requireAdmin, async (req, res) => {
   res.json({ success: true });
 });
 
+/* ---------------- УПРАВЛЕНИЕ ПРИВЯЗКАМИ (Admin) ---------------- */
+// Получить списки учеников и учителей
+app.get('/api/admin/assignments', requireAdmin, async (req, res) => {
+  try {
+    // Находим всех студентов и сразу подтягиваем данные их текущего учителя (если есть)
+    const students = await User.find({ role: 'student' }).populate('assignedTeacher', 'firstName lastName email');
+    // Находим всех учителей
+    const teachers = await User.find({ role: 'teacher' }).select('firstName lastName email');
+    res.json({ success: true, students, teachers });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+// Сохранить выбранного учителя для студента
+app.patch('/api/admin/assignments/:studentId', requireAdmin, async (req, res) => {
+  try {
+    const teacherId = req.body.teacherId === 'none' ? null : req.body.teacherId;
+    await User.findByIdAndUpdate(req.params.studentId, { assignedTeacher: teacherId });
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
 /* ---------------- Start ---------------- */
 const PORT = process.env.PORT || 5000;
 const HOST = process.env.HOST || '0.0.0.0';
