@@ -8,14 +8,15 @@
   body { margin: 0; padding: 0; font-family: sans-serif; overflow: hidden; background: #f8fafc; }
   .iframe-wrapper { height: 100vh; width: 100%; border: 0; }
   
-  #lessonLaunchBtn, #reviewsLaunchBtn, #slotsLaunchBtn, #usersLaunchBtn, #deferredLaunchBtn {
+  /* ИСПРАВЛЕНО: добавил #assignLaunchBtn сюда */
+  #lessonLaunchBtn, #reviewsLaunchBtn, #slotsLaunchBtn, #usersLaunchBtn, #deferredLaunchBtn, #assignLaunchBtn {
     position: fixed; right: 16px; z-index: 99999;
     color: #fff; border: none; border-radius: 12px;
     padding: 10px 14px; box-shadow: 0 10px 22px rgba(0,0,0,.18);
     cursor: pointer; font-weight: 800; font-family: inherit;
     transition: transform 0.2s;
   }
-  #lessonLaunchBtn:hover, #reviewsLaunchBtn:hover, #slotsLaunchBtn:hover, #usersLaunchBtn:hover, #assignLaunchBtn, #deferredLaunchBtn:hover {
+  #lessonLaunchBtn:hover, #reviewsLaunchBtn:hover, #slotsLaunchBtn:hover, #usersLaunchBtn:hover, #deferredLaunchBtn:hover, #assignLaunchBtn:hover {
     transform: scale(1.05);
   }
 
@@ -25,6 +26,7 @@
   #reviewsLaunchBtn { bottom: 116px; background: #7C3AED; }
   #usersLaunchBtn   { bottom: 166px; background: #059669; }
   #deferredLaunchBtn{ bottom: 216px; background: #B45309; }
+  #assignLaunchBtn  { bottom: 266px; background: #8b5cf6; } /* Кнопка привязки */
 
   /* Кнопка входа, если токена нет */
   #loginBtn {
@@ -63,7 +65,7 @@
 <button id="loginBtn">🔐 Войти в систему</button>
 
 <button id="lessonLaunchBtn">Create Lesson</button>
-<button id="assignLaunchBtn" style="bottom: 266px; background: #8b5cf6;">Ученики и Учителя</button>
+<button id="assignLaunchBtn">Ученики и Учителя</button>
 <button id="reviewsLaunchBtn">Manage Reviews</button>
 <button id="usersLaunchBtn">Manage Users</button>
 <button id="deferredLaunchBtn">Deferred Credits</button>
@@ -183,19 +185,32 @@
   </div>
 </div>
 
+<div id="assignModal" class="modal-overlay">
+  <div class="panel">
+    <div class="panel-head">
+      <div class="panel-title">Привязка Студентов к Преподавателям</div>
+      <button class="btn danger" id="assignCloseBtn">Закрыть</button>
+    </div>
+    <div class="panel-body">
+      <p style="color:#666; margin-top:0;">Выберите преподавателя из списка напротив студента. Сохранение происходит автоматически.</p>
+      <table>
+        <thead><tr><th>Студент</th><th>Email</th><th>Текущий Преподаватель</th></tr></thead>
+        <tbody id="assignTbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
 <script>
 document.addEventListener('DOMContentLoaded', function(){
   const API_BASE = window.location.origin;
 
-  // Умный поиск токена (Ищейка)
   const getToken = () => {
-    // 1. Сначала проверяем самые популярные названия
     const commonKeys = ['token', 'gec_token', 'admin_token', 'jwt', 'auth_token', 'accessToken', 'user'];
     for (let k of commonKeys) {
       let val = localStorage.getItem(k);
-      // Если токен сохранен в виде JSON-объекта
       if (val && val.includes('eyJ')) {
-        if (val.startsWith('eyJ')) return val; // Чистый токен
+        if (val.startsWith('eyJ')) return val; 
         try {
           const parsed = JSON.parse(val);
           if (parsed.token) return parsed.token;
@@ -203,17 +218,14 @@ document.addEventListener('DOMContentLoaded', function(){
       }
       if (val && val !== 'null' && val !== 'undefined') return val;
     }
-    
-    // 2. Если по именам не нашли, сканируем вообще всю память браузера на наличие JWT-токена
     for (let i = 0; i < localStorage.length; i++) {
       let key = localStorage.key(i);
       let val = localStorage.getItem(key);
       if (typeof val === 'string' && val.startsWith('eyJ') && val.split('.').length === 3) {
-        // Мы нашли скрытый токен!
         return val;
       }
     }
-    return ''; // Токена реально нет
+    return ''; 
   };
   
   const setToken = (token) => { 
@@ -239,24 +251,17 @@ document.addEventListener('DOMContentLoaded', function(){
     } catch (e) { console.error(e); throw e; }
   }
 
-  // UI логина
+  // Авторизация
   const loginModal = document.getElementById('loginModal');
   const loginBtn = document.getElementById('loginBtn');
-  
   document.getElementById('loginCloseBtn').onclick = () => loginModal.style.display = 'none';
   
-  // Автоматическая проверка каждые полсекунды
   setInterval(() => {
-    if (!getToken()) {
-      if (loginBtn) loginBtn.style.display = 'block';
-    } else {
-      if (loginBtn) loginBtn.style.display = 'none';
-    }
+    if (!getToken()) { if (loginBtn) loginBtn.style.display = 'block'; } 
+    else { if (loginBtn) loginBtn.style.display = 'none'; }
   }, 500);
 
-  if (loginBtn) {
-    loginBtn.onclick = () => loginModal.style.display = 'block';
-  }
+  if (loginBtn) loginBtn.onclick = () => loginModal.style.display = 'block';
 
   document.getElementById('adminLoginForm').onsubmit = async (e) => {
     e.preventDefault();
@@ -303,7 +308,7 @@ document.addEventListener('DOMContentLoaded', function(){
           </select>
         </td>
         <td>
-          <button class="btn primary" onclick="updateRole('${u._id}')">Save Role</button>
+          <button class="btn primary" onclick="updateRole('${u._id}')">Save</button>
           <button class="btn danger" onclick="deleteUser('${u._id}')">Del</button>
         </td>
       </tr>`;
@@ -324,7 +329,7 @@ document.addEventListener('DOMContentLoaded', function(){
   };
 
   window.deleteUser = async (id) => { 
-    if(confirm('Точно удалить этого пользователя навсегда?')) { 
+    if(confirm('Удалить навсегда?')) { 
       await apiCall(`${API_BASE}/api/admin/users/${id}`, { method: 'DELETE', headers: getAuthHeaders() }); 
       loadUsers(); 
     } 
@@ -335,8 +340,7 @@ document.addEventListener('DOMContentLoaded', function(){
   const slotEditor = document.getElementById('slotEditor');
   let editingId = null;
   document.getElementById('slotsLaunchBtn').onclick = () => { 
-    if(getToken()){ slotsModal.style.display='block'; listSlots(); } 
-    else { loginModal.style.display='block'; }
+    if(getToken()){ slotsModal.style.display='block'; listSlots(); } else { loginModal.style.display='block'; }
   };
   document.getElementById('slotsClose').onclick = () => slotsModal.style.display='none';
   document.getElementById('slotReload').onclick = listSlots;
@@ -381,8 +385,7 @@ document.addEventListener('DOMContentLoaded', function(){
   // --- УРОКИ ---
   const lessonModal = document.getElementById('lessonModal');
   document.getElementById('lessonLaunchBtn').onclick = () => { 
-    if(getToken()) lessonModal.style.display='block'; 
-    else loginModal.style.display='block';
+    if(getToken()) lessonModal.style.display='block'; else loginModal.style.display='block';
   };
   document.getElementById('lessonCloseBtn').onclick = () => lessonModal.style.display='none';
   document.getElementById('L_submit').onclick = async () => {
@@ -394,8 +397,7 @@ document.addEventListener('DOMContentLoaded', function(){
   // --- ОТЗЫВЫ ---
   const reviewsModal = document.getElementById('reviewsModal');
   document.getElementById('reviewsLaunchBtn').onclick = () => { 
-    if(getToken()){ reviewsModal.style.display='block'; loadAdminReviews(); } 
-    else { loginModal.style.display='block'; }
+    if(getToken()){ reviewsModal.style.display='block'; loadAdminReviews(); } else loginModal.style.display='block';
   };
   document.getElementById('reviewsCloseBtn').onclick = () => reviewsModal.style.display='none';
   async function loadAdminReviews() {
@@ -415,8 +417,7 @@ document.addEventListener('DOMContentLoaded', function(){
   const deferredEditor = document.getElementById('deferredEditor');
   let editingDefId = null;
   document.getElementById('deferredLaunchBtn').onclick = () => { 
-    if(getToken()){ deferredModal.style.display='block'; loadDeferred(); } 
-    else { loginModal.style.display='block'; }
+    if(getToken()){ deferredModal.style.display='block'; loadDeferred(); } else loginModal.style.display='block';
   };
   document.getElementById('deferredCloseBtn').onclick = () => deferredModal.style.display='none';
   document.getElementById('deferredAddBtn').onclick = () => { deferredEditor.style.display='block'; editingDefId = null; document.getElementById('def_email').value=''; };
@@ -438,87 +439,66 @@ document.addEventListener('DOMContentLoaded', function(){
     deferredEditor.style.display = 'none'; loadDeferred();
   };
   window.deleteDeferred = async (id) => { if (confirm('Удалить?')) { await apiCall(`${API_BASE}/api/admin/deferred/${id}`, { method: 'DELETE', headers: getAuthHeaders() }); loadDeferred(); } };
-});
-</script>
 
-<div id="assignModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:100000; align-items:center; justify-content:center;">
-  <div style="background:#fff; width:90%; max-width:800px; max-height:80vh; border-radius:12px; padding:20px; overflow-y:auto; position:relative;">
-    <button onclick="document.getElementById('assignModal').style.display='none'" style="position:absolute; right:20px; top:20px; background:red; color:white; border:none; padding:8px 12px; border-radius:8px; cursor:pointer;">Закрыть</button>
+  // --- ИСПРАВЛЕНО: ПРИВЯЗКА СТУДЕНТОВ И УЧИТЕЛЕЙ ---
+  const assignModal = document.getElementById('assignModal');
+  document.getElementById('assignLaunchBtn').onclick = async () => {
+    if (!getToken()) { loginModal.style.display='block'; return; }
     
-    <h2>Привязка Студентов к Преподавателям</h2>
-    <p style="color:#666;">Выберите преподавателя из выпадающего списка напротив каждого студента. Сохранение происходит автоматически.</p>
+    assignModal.style.display = 'block';
+    document.getElementById('assignTbody').innerHTML = '<tr><td colspan="3">Загрузка...</td></tr>';
     
-    <table style="width:100%; text-align:left; border-collapse:collapse; margin-top:16px;">
-      <thead>
-        <tr style="border-bottom:2px solid #eee;">
-          <th style="padding:10px;">Студент</th>
-          <th style="padding:10px;">Email</th>
-          <th style="padding:10px;">Текущий Преподаватель</th>
-        </tr>
-      </thead>
-      <tbody id="assignTbody">
-        </tbody>
-    </table>
-  </div>
-</div>
-
-<script>
-document.getElementById('assignLaunchBtn').onclick = async () => {
-  document.getElementById('assignModal').style.display = 'flex';
-  document.getElementById('assignTbody').innerHTML = '<tr><td colspan="3">Загрузка...</td></tr>';
-  
-  try {
-    const res = await apiCall(`${API_BASE}/api/admin/assignments`, { headers: getAuthHeaders() });
-    if (!res || !res.success) return;
-    
-    let html = '';
-    // Генерируем опции для select (список всех учителей)
-    let teacherOptions = `<option value="none">-- Без преподавателя --</option>`;
-    res.teachers.forEach(t => {
-      teacherOptions += `<option value="${t._id}">${t.firstName} ${t.lastName} (${t.email})</option>`;
-    });
-
-    res.students.forEach(s => {
-      // Проверяем, кто назначен сейчас
-      const currentTeacherId = s.assignedTeacher ? s.assignedTeacher._id : 'none';
+    try {
+      const res = await apiCall(`${API_BASE}/api/admin/assignments`, { headers: getAuthHeaders() });
+      if (!res || !res.success) return;
       
-      html += `
-        <tr style="border-bottom:1px solid #eee;">
-          <td style="padding:10px;">${s.firstName || 'Без имени'} ${s.lastName || ''}</td>
-          <td style="padding:10px;">${s.email}</td>
-          <td style="padding:10px;">
-            <select class="teacher-select" data-student-id="${s._id}" style="padding:8px; border-radius:6px; width:100%; border:1px solid #ccc;">
-              ${teacherOptions.replace(`value="${currentTeacherId}"`, `value="${currentTeacherId}" selected`)}
-            </select>
-          </td>
-        </tr>
-      `;
-    });
-    
-    document.getElementById('assignTbody').innerHTML = html;
-
-    // Вешаем слушатель на изменения: если админ выбрал другого учителя, сразу сохраняем в базу
-    document.querySelectorAll('.teacher-select').forEach(select => {
-      select.addEventListener('change', async (e) => {
-        const studentId = e.target.getAttribute('data-student-id');
-        const teacherId = e.target.value;
-        e.target.style.background = '#fef3c7'; // Желтая подсветка при сохранении
-        
-        await apiCall(`${API_BASE}/api/admin/assignments/${studentId}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-          body: JSON.stringify({ teacherId })
-        });
-        
-        e.target.style.background = '#d1fae5'; // Зеленая подсветка после успеха
-        setTimeout(() => e.target.style.background = '', 1500);
+      let html = '';
+      let teacherOptions = `<option value="none">-- Без преподавателя --</option>`;
+      res.teachers.forEach(t => {
+        teacherOptions += `<option value="${t._id}">${t.firstName} ${t.lastName} (${t.email})</option>`;
       });
-    });
 
-  } catch (err) {
-    document.getElementById('assignTbody').innerHTML = '<tr><td colspan="3" style="color:red;">Ошибка загрузки</td></tr>';
-  }
-};
+      res.students.forEach(s => {
+        const currentTeacherId = s.assignedTeacher ? s.assignedTeacher._id : 'none';
+        html += `
+          <tr>
+            <td>${s.firstName || 'Без имени'} ${s.lastName || ''}</td>
+            <td>${s.email}</td>
+            <td>
+              <select class="teacher-select" data-student-id="${s._id}">
+                ${teacherOptions.replace(`value="${currentTeacherId}"`, `value="${currentTeacherId}" selected`)}
+              </select>
+            </td>
+          </tr>
+        `;
+      });
+      
+      document.getElementById('assignTbody').innerHTML = html;
+
+      // Слушатель на автосохранение
+      document.querySelectorAll('.teacher-select').forEach(select => {
+        select.addEventListener('change', async (e) => {
+          const studentId = e.target.getAttribute('data-student-id');
+          const teacherId = e.target.value;
+          e.target.style.background = '#fef3c7'; 
+          
+          await apiCall(`${API_BASE}/api/admin/assignments/${studentId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+            body: JSON.stringify({ teacherId })
+          });
+          
+          e.target.style.background = '#d1fae5'; 
+          setTimeout(() => e.target.style.background = '', 1500);
+        });
+      });
+    } catch (err) {
+      document.getElementById('assignTbody').innerHTML = '<tr><td colspan="3" style="color:red;">Ошибка загрузки</td></tr>';
+    }
+  };
+  document.getElementById('assignCloseBtn').onclick = () => assignModal.style.display = 'none';
+
+});
 </script> 
 </body>
 </html>
