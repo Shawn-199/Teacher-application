@@ -239,12 +239,14 @@ document.addEventListener('DOMContentLoaded', async ()=>{
           <td>
             <div class="row">
               <select data-id="${b._id}" class="stSel">
-                <option ${b.status==='Scheduled'?'selected':''}>Scheduled</option>
-                <option ${b.status==='Completed'?'selected':''}>Completed</option>
-                <option ${b.status==='Cancelled'?'selected':''}>Cancelled</option>
-                <option ${b.status==='No-Show'?'selected':''}>No-Show</option>
-                <option ${b.status==='Rescheduled'?'selected':''}>Rescheduled</option>
-              </select>
+  <option ${b.status==='PendingPayment'?'selected':''}>PendingPayment</option>
+  <option ${b.status==='Scheduled'?'selected':''}>Scheduled</option>
+  <option ${b.status==='Completed'?'selected':''}>Completed</option>
+  <option ${b.status==='Late-Cancelled'?'selected':''}>Late-Cancelled</option>
+  <option ${b.status==='Cancelled'?'selected':''}>Cancelled</option>
+  <option ${b.status==='No-Show'?'selected':''}>No-Show</option>
+  <option ${b.status==='Rescheduled'?'selected':''}>Rescheduled</option>
+</select>
               <button class="ghost btnSave" data-id="${b._id}">Save</button>
             </div>
             <div class="small" style="margin-top:6px">
