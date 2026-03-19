@@ -540,7 +540,7 @@ function getMonthKey(date) {
   return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}`;
 }
 
-/ NEW: GET /api/student/deferred?month=YYYY-MM (default next month)
+// NEW: GET /api/student/deferred?month=YYYY-MM (default next month)
 app.get('/api/student/deferred', auth, async (req, res) => {
   try {
     const { month } = req.query;
