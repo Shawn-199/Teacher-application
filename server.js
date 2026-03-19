@@ -122,7 +122,9 @@ const UserSchema = new Schema({
   firstName: String,
   lastName: String,
   role: { type: String, default: 'student' }, // 'student' | 'teacher' | 'manager' | 'admin'
-  isGuest: { type: Boolean, default: false }
+  isGuest: { type: Boolean, default: false },
+  // ВНЕДРЕНО: привязка конкретного препода к студенту
+  assignedTeacher: { type: Schema.Types.ObjectId, ref: 'User' } 
 }, { timestamps: true });
 const User = model('User', UserSchema);
 
@@ -135,14 +137,13 @@ const BookingSchema = new Schema({
   childAge: { type: Number },
   country: { type: String },
   timeZone: { type: String },
-  dateStr: { type: String, required: true },  // legacy, kept for compatibility
-  timeStr: { type: String, required: true },  // legacy, kept for compatibility
+  dateStr: { type: String, required: true },
+  timeStr: { type: String, required: true },
   level:   { type: String, required: true },
-  status:  { type: String, default: 'Scheduled' }, // Scheduled | Completed | Cancelled | No-Show | Rescheduled
+  // ВНЕДРЕНО: статус по умолчанию теперь ожидает оплаты
+  status:  { type: String, default: 'PendingPayment' }, 
   teacherName: { type: String, default: process.env.TEACHER_NAME || 'Teacher' },
-  // NEW: teacherId (reference to User)
   teacherId: { type: Schema.Types.ObjectId, ref: 'User', index: true },
-  // start and end timestamps (ISO dates)
   start: { type: Date, required: true },
   end: { type: Date, required: true }
 }, { timestamps: true });
@@ -539,11 +540,12 @@ function getMonthKey(date) {
   return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}`;
 }
 
-// NEW: GET /api/student/deferred?month=YYYY-MM (default next month)
+/ NEW: GET /api/student/deferred?month=YYYY-MM (default next month)
 app.get('/api/student/deferred', auth, async (req, res) => {
   try {
     const { month } = req.query;
-    const targetMonth = month || getNextMonthKey();
+    // предполагается, что getNextMonthKey у вас определена выше
+    const targetMonth = month || getNextMonthKey(); 
     let deferred = await DeferredCredit.findOne({ student: req.user.uid, month: targetMonth });
     res.json({ success: true, count: deferred ? deferred.count : 0, month: targetMonth });
   } catch (e) {
@@ -560,7 +562,8 @@ app.post('/api/bookings/:id/move-to-next-month', auth, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid booking ID' });
     }
 
-    const booking = await Booking.findOne({ _id: id, user: req.user.uid });
+    // ДОБАВЛЕНО: .populate('teacherId'), чтобы достать email преподавателя для рассылки
+    const booking = await Booking.findOne({ _id: id, user: req.user.uid }).populate('teacherId');
     if (!booking) {
       return res.status(404).json({ success: false, message: 'Booking not found' });
     }
@@ -569,6 +572,7 @@ app.post('/api/bookings/:id/move-to-next-month', auth, async (req, res) => {
     const now = Date.now();
     const lessonTime = booking.start.getTime();
     const hoursUntil = (lessonTime - now) / (1000 * 60 * 60);
+    
     if (hoursUntil < 8) {
       return res.status(400).json({ success: false, message: 'Cannot move a lesson that starts in less than 8 hours' });
     }
@@ -576,7 +580,8 @@ app.post('/api/bookings/:id/move-to-next-month', auth, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Only scheduled lessons can be moved' });
     }
 
-    const nextMonth = getNextMonthKey();
+    // предполагается, что getNextMonthKey у вас определена
+    const nextMonth = getNextMonthKey(); 
     // Check limit
     let deferred = await DeferredCredit.findOne({ student: req.user.uid, month: nextMonth });
     const currentCount = deferred ? deferred.count : 0;
@@ -584,7 +589,7 @@ app.post('/api/bookings/:id/move-to-next-month', auth, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Maximum 2 lessons can be moved to next month' });
     }
 
-    // Cancel the current booking (free up slot) – NO cancellation email is sent here
+    // Cancel the current booking (free up slot)
     booking.status = 'Cancelled';
     await booking.save();
 
@@ -596,7 +601,7 @@ app.post('/api/bookings/:id/move-to-next-month', auth, async (req, res) => {
     }
     await deferred.save();
 
-    // Send specific "moved to next month" notifications (not cancellation)
+    // Send notifications to Admin
     await sendEmail({
       to: ADMIN_TO,
       subject: `📅 Lesson moved to next month: ${booking.childName}`,
@@ -609,6 +614,7 @@ app.post('/api/bookings/:id/move-to-next-month', auth, async (req, res) => {
       `
     });
 
+    // Send notification to Student
     await sendEmail({
       to: booking.email,
       subject: 'Your lesson has been moved to next month',
@@ -620,6 +626,21 @@ app.post('/api/bookings/:id/move-to-next-month', auth, async (req, res) => {
         <p>Please log in to your dashboard to schedule your deferred lesson.</p>
       `
     });
+
+    // ДОБАВЛЕНО: Уведомление Преподавателю
+    // Студент перенес урок заранее, так что урок преподу не оплачивается, но он должен знать, что слот свободен
+    if (booking.teacherId && booking.teacherId.email) {
+      await sendEmail({
+        to: booking.teacherId.email,
+        subject: `Отмена урока (Перенос): ${booking.childName} (${booking.dateStr})`,
+        html: `
+          <h3>Урок отменен студентом (перенесен на следующий месяц)</h3>
+          <p>Ученик: <b>${booking.childName}</b></p>
+          <p>Освободившаяся дата: ${booking.dateStr} в ${booking.timeStr}</p>
+          <p>Так как студент отменил урок заранее (более чем за 8 часов), этот урок <b>не оплачивается</b>. Ваш слот снова свободен в расписании.</p>
+        `
+      });
+    }
 
     res.json({ success: true, deferredCount: deferred.count });
   } catch (e) {
