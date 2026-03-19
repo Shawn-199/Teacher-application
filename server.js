@@ -1645,6 +1645,32 @@ app.delete('/api/admin/reviews/:id', requireAdmin, async (req, res) => {
   res.json({ success: true });
 });
 
+/* ---------------- УПРАВЛЕНИЕ ПОЛЬЗОВАТЕЛЯМИ (Admin) ---------------- */
+// 1. Получить список всех пользователей для админки
+app.get('/api/admin/users', requireAdmin, async (req, res) => {
+  try {
+    const users = await User.find({}).select('email firstName lastName role');
+    res.json({ success: true, users });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+// 2. Изменить роль пользователя (дать права Teacher / Admin)
+app.patch('/api/admin/users/:id', requireAdmin, async (req, res) => {
+  try {
+    const { role } = req.body;
+    if (!['student', 'teacher', 'manager', 'admin'].includes(role)) {
+      return res.status(400).json({ success: false, message: 'Неверная роль' });
+    }
+    
+    await User.findByIdAndUpdate(req.params.id, { role: role });
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
 /* ---------------- УПРАВЛЕНИЕ ПРИВЯЗКАМИ (Admin) ---------------- */
 // Получить списки учеников и учителей
 app.get('/api/admin/assignments', requireAdmin, async (req, res) => {
