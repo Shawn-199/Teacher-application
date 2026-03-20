@@ -2485,7 +2485,9 @@
           try {
             const res = await fetch(`${API_BASE}/api/me`, { headers: getAuthHeaders() });
             const data = await res.json();
-            
+
+            console.log("Данные от сервера:", data); // ДОБАВЬТЕ ЭТО
+
             if (data.success && data.user) {
               window.currentUserRole = data.user.role;
               

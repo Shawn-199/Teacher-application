@@ -237,7 +237,12 @@ async function sendEmail(opts) {
 function signToken(user) {
   if (!process.env.JWT_SECRET) throw new Error('Missing JWT_SECRET in .env');
   return jwt.sign(
-    { uid: user._id, email: user.email, role: user.role },
+    { 
+      uid: user._id, 
+      id: user._id, // Добавили это для совместимости с фронтендом
+      email: user.email, 
+      role: user.role 
+    },
     process.env.JWT_SECRET,
     { expiresIn: '30d' }
   );
