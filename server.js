@@ -277,7 +277,7 @@ function optionalAuth(req, res, next) {
 
 /* -------- Admin guard (для /api/admin/*) -------- */
 const ADMIN_PAGE_SIZE_DEFAULT = 25;
-const LESSON_STATUSES = ['Scheduled','Completed','Cancelled','No-Show','Rescheduled'];
+const LESSON_STATUSES = ['PendingPayment','Scheduled','Completed','Cancelled','No-Show','Rescheduled'];
 
 async function requireAdmin(req, res, next) {
   try {
