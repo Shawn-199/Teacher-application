@@ -891,7 +891,7 @@
               <div class="stat-icon"><i class="fas fa-users"></i></div>
             </div>
             <div class="stat-value" id="teacher-students-count">0</div>
-            <div class="stat-sub">Прикрепленные студенты</div>
+            <div class="stat-sub">Assigned students</div>
           </div>
           
           <div class="card">
@@ -909,7 +909,7 @@
             <div class="card-title" style="font-size: 18px;">Students</div>
           </div>
           <div id="teacher-students-list">
-            <div style="text-align: center; color: #6b7280; font-size: 14px; padding: 10px;">Загрузка...</div>
+            <div style="text-align: center; color: #6b7280; font-size: 14px; padding: 10px;">Loading...</div>
           </div>
         </div>
       </section>
@@ -928,8 +928,8 @@
             <i class="fas fa-globe"></i> All times in your timezone: <strong id="userTimezone"></strong>
           </div>
           <div class="schedule-legend">
-            <span><span class="legend-dot" style="background:var(--primary);"></span> Оплаченные</span>
-            <span><span class="legend-dot" style="background:#fef3c7; border:1px solid #f59e0b;"></span> Проверка</span>
+            <span><span class="legend-dot" style="background:var(--primary);"></span> Paid</span>
+            <span><span class="legend-dot" style="background:#fef3c7; border:1px solid #f59e0b;"></span> Pending review</span>
             <span><span class="legend-dot" style="background:#b34141;"></span> Locked (&lt;8h)</span>
             <span><span class="legend-dot" style="background:#ffd966;"></span> Fixed</span>
             <span><span class="legend-dot" style="background:#e2ebf2;"></span> OFF</span>
@@ -948,17 +948,17 @@
       </section>
 
       <div id="multiBookBar" style="display:none; position:fixed; bottom:80px; left:50%; transform:translateX(-50%); background:var(--primary); color:white; padding:12px 24px; border-radius:40px; z-index:400; box-shadow:0 10px 25px rgba(0,0,0,0.3); align-items:center; gap:16px;">
-        <span id="multiBookCount" style="font-weight:600; white-space:nowrap;">Выбрано: 0</span>
-        <button id="btnMultiBook" class="btn" style="padding:8px 16px; font-size:0.85rem; border-radius:20px;">Забронировать</button>
+        <span id="multiBookCount" style="font-weight:600; white-space:nowrap;">Selected: 0</span>
+        <button id="btnMultiBook" class="btn" style="padding:8px 16px; font-size:0.85rem; border-radius:20px;">Book</button>
         <button id="btnMultiCancel" style="background:transparent; color:rgba(255,255,255,0.8); border:none; cursor:pointer; font-size:1.2rem; display:flex; align-items:center; justify-content:center;"><i class="fas fa-times"></i></button>
       </div>
 
       <div class="schedule-modal" id="pendingModal" role="dialog" aria-modal="true" style="display:none;">
         <div class="schedule-modal-card" style="text-align:center;">
           <i class="fas fa-hourglass-half" style="font-size:3rem; color:var(--warning); margin-bottom:16px;"></i>
-          <h4 style="margin:0 0 12px; color:var(--dark);">Уроки на проверке</h4>
-          <p style="color:var(--gray); font-size:0.95rem; margin-bottom:24px;">Эти уроки ожидают подтверждения администратором. Они будут добавлены в ваше основное расписание сразу после проверки оплаты.</p>
-          <button class="btn btn-muted" onclick="document.getElementById('pendingModal').style.display='none'" style="width:100%;">Понятно</button>
+          <h4 style="margin:0 0 12px; color:var(--dark);">Lessons under review</h4>
+          <p style="color:var(--gray); font-size:0.95rem; margin-bottom:24px;">These lessons are waiting for admin confirmation. They will be added to your main schedule immediately after payment verification.</p>
+          <button class="btn btn-muted" onclick="document.getElementById('pendingModal').style.display='none'" style="width:100%;">Got it</button>
         </div>
       </div>
 
@@ -1119,7 +1119,6 @@
       const setToken = (t) => localStorage.setItem(LS_TOKEN, t);
       const clearToken = () => localStorage.removeItem(LS_TOKEN);
       
-      // ИСПРАВЛЕНИЕ: Добавлена функция getAuthHeaders, которой не хватало
       const getAuthHeaders = () => ({ 'Content-Type': 'application/json', Authorization: 'Bearer ' + getToken() });
       
       const $ = (sel) => document.querySelector(sel);
@@ -1540,10 +1539,10 @@
           level,
           phone: '',
           startISO: p.startISO,
-          useDeferred
+          useDeferred,
+          status: 'pendingpayment' /* Force it to pending payment */
         };
 
-        // ИСПРАВЛЕНИЕ: Восстановлен правильный синтаксис функции
         try {
           const res = await fetch(`${API_BASE}/api/book`, {
             method: 'POST',
@@ -1562,7 +1561,7 @@
             return false;
           }
         } catch (e) {
-          if (!skipRefetch) showToast('Ошибка сети при бронировании', 'bad');
+          if (!skipRefetch) showToast('Network error during booking', 'bad');
           return false;
         }
       }
@@ -1610,7 +1609,7 @@
         const countLabel = $('#multiBookCount');
         if (AppState.multiBooking.length > 0) {
           bar.style.display = 'flex';
-          countLabel.textContent = `Выбрано: ${AppState.multiBooking.length}`;
+          countLabel.textContent = `Selected: ${AppState.multiBooking.length}`;
         } else {
           bar.style.display = 'none';
         }
@@ -1636,12 +1635,12 @@
 
         $('#appLoader').classList.add('hidden');
         if (successCount > 0) {
-          showToast(`Успешно оформлено уроков: ${successCount}`, 'good');
+          showToast(`Successfully booked lessons: ${successCount}`, 'good');
           AppState.multiBooking = [];
           updateMultiBookBar();
           await fetchScheduleData();
         } else {
-          showToast('Ошибка при оформлении', 'bad');
+          showToast('Booking error', 'bad');
         }
       });
 
@@ -2079,7 +2078,7 @@
             if (lesson) {
               if (isPending) {
                 div.classList.add('slot-pending');
-                div.innerHTML = `<i class="fas fa-hourglass-half"></i> ЖДЕТ`;
+                div.innerHTML = `<i class="fas fa-hourglass-half"></i> PENDING`;
                 div.onclick = () => { document.getElementById('pendingModal').style.display='flex'; };
               } else {
                 div.classList.add('slot-my');
@@ -2117,15 +2116,15 @@
 
                 div.onclick = async () => {
                   if (window.currentUserRole === 'teacher') {
-                    if (confirm('Изменить статус этого слота (Открыть/Закрыть)?')) {
+                    if (confirm('Change the status of this slot (Open/Close)?')) {
                       try {
                         const sId = slot._id || slot.id || (slot.slot && slot.slot._id);
-                        if (!sId) { showToast('Не удалось найти ID слота', 'bad'); return; }
+                        if (!sId) { showToast('Could not find slot ID', 'bad'); return; }
                         const res = await fetch(`${API_BASE}/api/teacher/slots/${sId}/toggle`, { method: 'PATCH', headers: getAuthHeaders() });
                         const data = await res.json();
-                        if (data.success) { showToast(data.isActive ? 'Слот ОТКРЫТ' : 'Слот ЗАКРЫТ', 'good'); if (typeof fetchScheduleData === 'function') fetchScheduleData(); } 
-                        else showToast(data.message || 'Ошибка', 'bad');
-                      } catch (e) { showToast('Ошибка соединения', 'bad'); }
+                        if (data.success) { showToast(data.isActive ? 'Slot OPENED' : 'Slot CLOSED', 'good'); if (typeof fetchScheduleData === 'function') fetchScheduleData(); } 
+                        else showToast(data.message || 'Error', 'bad');
+                      } catch (e) { showToast('Connection error', 'bad'); }
                     }
                   } else {
                     const idx = AppState.multiBooking.findIndex(s => s.id === slotId);
@@ -2507,10 +2506,14 @@
         // === ЛОГИКА ДЛЯ ПРЕПОДАВАТЕЛЯ ===
         window.currentUserRole = 'student'; 
 
-        async function checkUserRoleAndSetupUI() {
+       async function checkUserRoleAndSetupUI() {
           try {
             const token = getToken();
-            if(!token) return;
+            if(!token) {
+              renderApp();
+              return;
+            }
+            
             const res = await fetch(`${API_BASE}/api/me`, { headers: getAuthHeaders() });
             const data = await res.json();
 
@@ -2518,6 +2521,9 @@
               window.currentUserRole = data.user.role;
               
               if (window.currentUserRole === 'teacher') {
+                // 1. Показываем основной интерфейс (убирает display:none у .container)
+                showLogin(false);
+                
                 const navCourses = document.getElementById('navCourses');
                 if (navCourses) navCourses.style.display = 'none';
                 
@@ -2526,12 +2532,21 @@
                 
                 showView('teacher-dashboard');
                 loadTeacherDashboard();
+                
+                // 2. Скрываем спиннер для учителя!
+                document.getElementById('appLoader').classList.add('hidden');
               } else {
                 renderApp();
               }
+            } else {
+              // 3. Токен просрочен или сервер вернул ошибку авторизации
+              // Очищаем локальное хранилище и перекидываем на окно логина
+              clearToken();
+              renderApp();
             }
           } catch (e) {
-            console.error('Ошибка проверки роли', e);
+            console.error('Role check error', e);
+            // При отсутствии интернета или падении сервера тоже запускаем базовую отрисовку
             renderApp();
           }
         }
@@ -2556,16 +2571,16 @@
                     ${s.firstName ? s.firstName[0].toUpperCase() : 'U'}
                   </div>
                   <div>
-                    <div style="font-weight: 700; color: #111827;">${s.firstName || 'Без имени'} ${s.lastName || ''}</div>
+                    <div style="font-weight: 700; color: #111827;">${s.firstName || 'No name'} ${s.lastName || ''}</div>
                     <div style="font-size: 13px; color: #6b7280;">${s.email}</div>
                   </div>
                 </div>
               `).join('');
             } else {
-              listEl.innerHTML = '<div style="color: #6b7280; font-size: 14px; text-align: center; padding: 10px;">У вас пока нет учеников</div>';
+              listEl.innerHTML = '<div style="color: #6b7280; font-size: 14px; text-align: center; padding: 10px;">You have no students yet</div>';
             }
           } catch (e) {
-            console.error('Ошибка загрузки дашборда', e);
+            console.error('Dashboard load error', e);
           }
         }
 

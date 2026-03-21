@@ -784,12 +784,12 @@ app.post('/api/book', auth, async (req, res) => {
       }
     }
 
-    const booking = await Booking.create({
+   const booking = await Booking.create({
       user: req.user.uid,
       email, childName, parentName, childAge, country, timeZone,
       phone: phone || '',
       dateStr, timeStr, level,
-      status: 'Scheduled',
+      status: 'PendingPayment', // <--- ТЕПЕРЬ СТАТУС БУДЕТ ОЖИДАТЬ ОПЛАТЫ
       teacherName: process.env.TEACHER_NAME || 'Teacher',
       // teacherId can be set later
       start, end
