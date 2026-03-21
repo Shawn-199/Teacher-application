@@ -314,7 +314,6 @@ async function requireTeacher(req, res, next) {
         return res.status(401).json({ success: false, message: 'User not found' });
     }
 
-    // ГЛАВНОЕ ИЗМЕНЕНИЕ ЗДЕСЬ:
     // Пропускаем, если это твоя почта (владелец), ИЛИ если роль = admin, ИЛИ если роль = teacher
     if (
       u.email === 'shakhrom.azimov99@gmail.com' || 
@@ -332,6 +331,7 @@ async function requireTeacher(req, res, next) {
     return res.status(401).json({ success: false, message: 'Invalid token' });
   }
 }
+
 /* ---------------- Health ---------------- */
 app.get('/health', (req, res) => res.json({ ok: true }));
 
@@ -523,7 +523,7 @@ app.get('/api/me', optionalAuth, async (req, res) => {
 async function isSlotBooked(start, duration = 25, excludeId = null) {
   const end = new Date(start.getTime() + duration * 60 * 1000);
   const query = {
-    status: { $in: ['Scheduled', 'Rescheduled'] },
+    status: { $in: ['Scheduled', 'Rescheduled', 'PendingPayment'] }, // Added PendingPayment to prevent double booking of unpaid slots
     $or: [
       { start: { $lt: end }, end: { $gt: start } } // any overlap
     ]
@@ -545,11 +545,10 @@ function getMonthKey(date) {
   return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}`;
 }
 
-// NEW: GET /api/student/deferred?month=YYYY-MM (default next month)
+// GET /api/student/deferred?month=YYYY-MM (default next month)
 app.get('/api/student/deferred', auth, async (req, res) => {
   try {
     const { month } = req.query;
-    // предполагается, что getNextMonthKey у вас определена выше
     const targetMonth = month || getNextMonthKey(); 
     let deferred = await DeferredCredit.findOne({ student: req.user.uid, month: targetMonth });
     res.json({ success: true, count: deferred ? deferred.count : 0, month: targetMonth });
@@ -559,7 +558,7 @@ app.get('/api/student/deferred', auth, async (req, res) => {
   }
 });
 
-// NEW: POST /api/bookings/:id/move-to-next-month
+// POST /api/bookings/:id/move-to-next-month
 app.post('/api/bookings/:id/move-to-next-month', auth, async (req, res) => {
   try {
     const { id } = req.params;
@@ -567,7 +566,6 @@ app.post('/api/bookings/:id/move-to-next-month', auth, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid booking ID' });
     }
 
-    // ДОБАВЛЕНО: .populate('teacherId'), чтобы достать email преподавателя для рассылки
     const booking = await Booking.findOne({ _id: id, user: req.user.uid }).populate('teacherId');
     if (!booking) {
       return res.status(404).json({ success: false, message: 'Booking not found' });
@@ -585,7 +583,6 @@ app.post('/api/bookings/:id/move-to-next-month', auth, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Only scheduled lessons can be moved' });
     }
 
-    // предполагается, что getNextMonthKey у вас определена
     const nextMonth = getNextMonthKey(); 
     // Check limit
     let deferred = await DeferredCredit.findOne({ student: req.user.uid, month: nextMonth });
@@ -632,8 +629,7 @@ app.post('/api/bookings/:id/move-to-next-month', auth, async (req, res) => {
       `
     });
 
-    // ДОБАВЛЕНО: Уведомление Преподавателю
-    // Студент перенес урок заранее, так что урок преподу не оплачивается, но он должен знать, что слот свободен
+    // Уведомление Преподавателю
     if (booking.teacherId && booking.teacherId.email) {
       await sendEmail({
         to: booking.teacherId.email,
@@ -833,6 +829,63 @@ app.post('/api/book', auth, async (req, res) => {
   } catch (e) {
     console.error('Book error:', e);
     res.status(500).json({ success:false, message:'Booking failed' });
+  }
+});
+
+// ==== NEW: BULK BOOKING ENDPOINT ====
+app.post('/api/book/bulk', auth, async (req, res) => {
+  try {
+    const { slots, email, childName, parentName, childAge, country, timeZone, level, phone } = req.body;
+    if (!slots || !Array.isArray(slots) || slots.length === 0) {
+      return res.status(400).json({ success: false, message: 'No slots provided' });
+    }
+    
+    const createdBookings = [];
+    for (const slot of slots) {
+      const start = new Date(slot.startISO);
+      if (isNaN(start)) continue;
+      
+      if (await isSlotBooked(start)) continue; // skip if already booked
+      
+      const dateStr = start.toISOString().split('T')[0];
+      const timeStr = start.toISOString().split('T')[1].substring(0,5);
+      const end = new Date(start.getTime() + 25 * 60 * 1000);
+      
+      const booking = await Booking.create({
+        user: req.user.uid,
+        email, childName, parentName, childAge, country, timeZone,
+        phone: phone || '',
+        dateStr, timeStr, level,
+        status: 'PendingPayment',
+        teacherName: process.env.TEACHER_NAME || 'Teacher',
+        start, end
+      });
+      createdBookings.push(booking);
+    }
+    
+    if (createdBookings.length === 0) {
+      return res.status(409).json({ success: false, message: 'All selected slots were already booked' });
+    }
+
+    // Отправляем ОДНО суммарное письмо администратору о массовом бронировании
+    const slotsHtml = createdBookings.map(b => `<li>${b.dateStr} at ${b.timeStr}</li>`).join('');
+    await sendEmail({
+      to: ADMIN_TO,
+      subject: `🗓️ Массовое бронирование уроков: ${childName} (${createdBookings.length} уроков)`,
+      html: `
+        <h2>Новое массовое бронирование</h2>
+        <p><strong>Ученик:</strong> ${childName}</p>
+        <p><strong>Родитель:</strong> ${parentName}</p>
+        <p><strong>Почта:</strong> ${email}</p>
+        <p><strong>Всего уроков:</strong> ${createdBookings.length}</p>
+        <ul>${slotsHtml}</ul>
+      `
+    });
+
+    res.json({ success: true, count: createdBookings.length, bookings: createdBookings });
+  } catch (e) {
+    console.error('Bulk book error:', e);
+    res.status(500).json({ success: false, message: 'Bulk booking failed' });
   }
 });
 
@@ -1193,7 +1246,7 @@ app.delete('/api/admin/deferred/:id', requireAdmin, async (req, res) => {
   }
 });
 
-/* ---------------- NEW: Admin create lesson ---------------- */
+/* ---------------- Admin create lesson ---------------- */
 // Fixed teacher timezone offset (Asia/Dushanbe, UTC+5)
 const TEACHER_TZ_OFFSET = 5; // hours ahead of UTC
 
@@ -1214,7 +1267,7 @@ app.post('/api/admin/bookings/create', requireAdmin, async (req, res) => {
       });
     }
     // Admin enters local time (teacher's timezone). Convert to UTC before storing.
-    const localDate = new Date(`${dateStr}T${timeStr}:00`); // local in server's timezone? Better to treat as teacher's fixed offset.
+    const localDate = new Date(`${dateStr}T${timeStr}:00`); 
     // Assume the input is in teacher's local time (UTC+5) and convert to UTC.
     const start = new Date(localDate.getTime() - TEACHER_TZ_OFFSET * 60 * 60 * 1000);
     const end = new Date(start.getTime() + 25 * 60 * 1000); // 25 minutes
@@ -1245,10 +1298,46 @@ app.post('/api/admin/bookings/create', requireAdmin, async (req, res) => {
 
 /* ---------------- Teacher APIs ---------------- */
 
+// ==== NEW: GET /api/teacher/dashboard ====
+app.get('/api/teacher/dashboard', requireTeacher, async (req, res) => {
+  try {
+    const teacherId = req.user.id;
+    // Количество закрепленных за преподавателем учеников
+    const studentsCount = await User.countDocuments({ role: 'student', assignedTeacher: teacherId });
+    
+    // Проведенные уроки в текущем месяце
+    const startOfMonth = new Date(new Date().setDate(1));
+    const endOfMonth = new Date(new Date().setMonth(startOfMonth.getMonth() + 1, 0));
+    
+    const lessonsThisMonth = await Booking.countDocuments({
+      teacherId: teacherId,
+      start: { $gte: startOfMonth, $lte: endOfMonth },
+      status: { $in: ['Completed', 'Conducted'] }
+    });
+
+    res.json({ success: true, studentsCount, lessonsThisMonth });
+  } catch (e) {
+    res.status(500).json({ success: false, message: 'Dashboard load failed' });
+  }
+});
+
+// ==== NEW: GET /api/teacher/students ====
+app.get('/api/teacher/students', requireTeacher, async (req, res) => {
+  try {
+    const teacherId = req.user.id;
+    const students = await User.find({ role: 'student', assignedTeacher: teacherId })
+                               .select('firstName lastName email')
+                               .lean();
+    res.json({ success: true, students });
+  } catch (e) {
+    res.status(500).json({ success: false, message: 'Failed to load students' });
+  }
+});
+
 // GET /api/teacher/schedule — teacher's bookings and slots for a date range
 app.get('/api/teacher/schedule', requireTeacher, async (req, res) => {
   const { from, to } = req.query;
-  const teacherId = req.teacher.id;
+  const teacherId = req.user.id; // ИСПРАВЛЕНО: было req.teacher.id
   const start = from ? new Date(from) : new Date(new Date().setDate(1)); // start of month
   const end = to ? new Date(to) : new Date(new Date().setMonth(start.getMonth()+1, 0));
 
@@ -1256,7 +1345,7 @@ app.get('/api/teacher/schedule', requireTeacher, async (req, res) => {
     Booking.find({
       teacherId,
       start: { $gte: start, $lte: end },
-      status: { $in: ['Scheduled', 'Rescheduled'] }
+      status: { $in: ['Scheduled', 'Rescheduled', 'PendingPayment'] }
     }).lean(),
     TimeSlot.find({
       teacherId,
@@ -1276,21 +1365,21 @@ app.get('/api/teacher/schedule', requireTeacher, async (req, res) => {
 
 // GET /api/teacher/slots — list teacher's own slots
 app.get('/api/teacher/slots', requireTeacher, async (req, res) => {
-  const teacherId = req.teacher.id;
+  const teacherId = req.user.id; // ИСПРАВЛЕНО
   const slots = await TimeSlot.find({ teacherId }).sort({ createdAt: -1 }).limit(500);
   res.json({ success:true, slots });
 });
 
 // POST /api/teacher/slots — create a new slot
 app.post('/api/teacher/slots', requireTeacher, async (req, res) => {
-  const teacherId = req.teacher.id;
+  const teacherId = req.user.id; // ИСПРАВЛЕНО
   const teacher = await User.findById(teacherId);
   if (!teacher) return res.status(404).json({ success:false, message:'Teacher not found' });
 
   const slotData = { 
     ...req.body, 
     teacherId, 
-    teacherName: (teacher.firstName || '') + ' ' + (teacher.lastName || '')
+    teacherName: (teacher.firstName || 'Teacher') + ' ' + (teacher.lastName || '')
   };
   const slot = await TimeSlot.create(slotData);
   res.json({ success:true, slot });
@@ -1299,7 +1388,7 @@ app.post('/api/teacher/slots', requireTeacher, async (req, res) => {
 // PATCH /api/teacher/slots/:id/toggle — toggle isActive
 app.patch('/api/teacher/slots/:id/toggle', requireTeacher, async (req, res) => {
   const { id } = req.params;
-  const slot = await TimeSlot.findOne({ _id: id, teacherId: req.teacher.id });
+  const slot = await TimeSlot.findOne({ _id: id, teacherId: req.user.id }); // ИСПРАВЛЕНО
   if (!slot) return res.status(404).json({ success:false, message:'Slot not found or not yours' });
   slot.isActive = !slot.isActive;
   await slot.save();
@@ -1309,7 +1398,7 @@ app.patch('/api/teacher/slots/:id/toggle', requireTeacher, async (req, res) => {
 // DELETE /api/teacher/slots/:id — delete slot
 app.delete('/api/teacher/slots/:id', requireTeacher, async (req, res) => {
   const { id } = req.params;
-  const result = await TimeSlot.deleteOne({ _id: id, teacherId: req.teacher.id });
+  const result = await TimeSlot.deleteOne({ _id: id, teacherId: req.user.id }); // ИСПРАВЛЕНО
   res.json({ success: result.deletedCount > 0 });
 });
 
@@ -1336,7 +1425,7 @@ app.get('/api/schedule', optionalAuth, async (req, res) => {
 
     // 1) Lessons from bookings – now using the start field
     const lessons = await Booking.find({
-      status: { $in: ['Scheduled', 'Rescheduled'] },
+      status: { $in: ['Scheduled', 'Rescheduled', 'PendingPayment'] },
       start: { $gte: from, $lte: to }
     }).lean();
 

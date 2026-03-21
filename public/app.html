@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=yes" />
   <meta name="robots" content="noindex, nofollow">
-  <title>Grand English Courses · Student</title>
+  <title>Grand English Courses · Portal</title>
 
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
@@ -19,10 +19,10 @@
   <style>
     /* ===== RESET & VARIABLES ===== */
     :root{
-      --primary: #1b325f;        /* dark blue – main brand */
+      --primary: #1b325f;
       --primary-light: #2a4575;
       --primary-dark: #0f1f3a;
-      --accent: #ffcc00;          /* yellow – for highlights & buttons */
+      --accent: #ffcc00;
       --accent-light: #ffe066;
       --success: #10b981;
       --warning: #f59e0b;
@@ -573,11 +573,15 @@
       border-radius: 4px;
       margin-right: 4px;
     }
+    
+    /* Скроллинг и "липкие" заголовки для расписания */
     .schedule-grid-wrapper {
-      overflow-x: auto;
+      overflow: auto;
+      max-height: 65vh;
       -webkit-overflow-scrolling: touch;
       border-top: 1px solid var(--gray-light);
       background: white;
+      position: relative;
     }
     .schedule-timetable,
     .schedule-timetable-fixed {
@@ -604,6 +608,8 @@
       background: white;
       transition: background 0.1s;
     }
+    
+    /* СДЕЛАТЬ ШАПКУ И КОЛОНКУ ЛИПКИМИ */
     .schedule-header-cell {
       background: #f8f9fc !important;
       color: #1b325f !important;
@@ -612,18 +618,16 @@
       flex-direction: column;
       padding: 8px 2px;
       font-size: 0.7rem;
-      position: -webkit-sticky;
+      font-weight: 600;
       position: sticky;
       top: 0;
       z-index: 30;
-      font-weight: 600;
     }
     .schedule-time-col {
       background:#ffffff !important;
       color:#1b325f !important;
       font-weight: 600;
       border-right: 1px solid #e2e8f0;
-      position: -webkit-sticky;
       position: sticky;
       left: 0;
       z-index: 35;
@@ -632,6 +636,7 @@
     .schedule-header-cell.schedule-time-col {
       z-index: 40 !important;
     }
+
     .slot-my {
       background: var(--primary) !important;
       color: white;
@@ -968,10 +973,23 @@
           <div style="background:var(--gray-lighter); padding:12px; border-radius:18px; font-size:0.9rem; font-weight:600; margin-bottom:12px;" id="scheduleModalInfo"></div>
           <div class="lock-warn" id="scheduleLockWarning" style="background:#ffe8d9; border-radius:14px; padding:10px; font-size:0.8rem; color:#874d00; margin:8px 0; display:none;"><i class="fas fa-lock"></i> Locked: less than 8h – only cancellation allowed</div>
           
-          <button class="modal-btn btn-resched" id="scheduleRescheduleBtn" style="width:100%; padding:14px; border-radius:24px; border:none; background:var(--primary); color:white; font-weight:600; margin-top:8px; display:flex; align-items:center; justify-content:center; gap:8px;"><i class="fas fa-arrows-alt"></i> Reschedule</button>
-          <button class="modal-btn btn-move" id="scheduleMoveBtn" style="width:100%; padding:14px; border-radius:24px; border:none; background:var(--warning); color:white; font-weight:600; margin-top:8px; display:flex; align-items:center; justify-content:center; gap:8px;"><i class="fas fa-calendar-plus"></i> Move to next month</button>
-          <button class="modal-btn btn-cancel" id="scheduleCancelBtn" style="width:100%; padding:14px; border-radius:24px; border:none; background:#ffe3e3; color:#b34141; font-weight:600; margin-top:8px; display:flex; align-items:center; justify-content:center; gap:8px;"><i class="fas fa-ban"></i> Cancel lesson</button>
+          <div id="studentActions">
+            <button class="modal-btn btn-resched" id="scheduleRescheduleBtn" style="width:100%; padding:14px; border-radius:24px; border:none; background:var(--primary); color:white; font-weight:600; margin-top:8px; display:flex; align-items:center; justify-content:center; gap:8px;"><i class="fas fa-arrows-alt"></i> Reschedule</button>
+            <button class="modal-btn btn-move" id="scheduleMoveBtn" style="width:100%; padding:14px; border-radius:24px; border:none; background:var(--warning); color:white; font-weight:600; margin-top:8px; display:flex; align-items:center; justify-content:center; gap:8px;"><i class="fas fa-calendar-plus"></i> Move to next month</button>
+            <button class="modal-btn btn-cancel" id="scheduleCancelBtn" style="width:100%; padding:14px; border-radius:24px; border:none; background:#ffe3e3; color:#b34141; font-weight:600; margin-top:8px; display:flex; align-items:center; justify-content:center; gap:8px;"><i class="fas fa-ban"></i> Cancel lesson</button>
+          </div>
           <button class="modal-btn btn-close" onclick="closeScheduleModal()" style="width:100%; padding:14px; border-radius:24px; border:none; background:var(--gray-lighter); color:var(--dark); font-weight:600; margin-top:8px;"><i class="fas fa-times"></i> Close</button>
+        </div>
+      </div>
+
+      <div id="teacherSlotModal" class="schedule-modal" style="display:none;">
+        <div class="schedule-modal-card">
+          <h4 style="margin-top:0; color:var(--primary)"><i class="fas fa-cog"></i> Manage Slot</h4>
+          <p id="tsmText" style="font-size:0.95rem; color:var(--dark); margin: 15px 0;"></p>
+          <div style="display:flex; gap:10px; justify-content:flex-end;">
+            <button class="btn btn-muted" onclick="document.getElementById('teacherSlotModal').style.display='none'">Cancel</button>
+            <button class="btn btn-primary" id="tsmConfirmBtn">Confirm</button>
+          </div>
         </div>
       </div>
 
@@ -1095,17 +1113,13 @@
         }
       }
 
-      const fixedData = {
-        '19:00': { 0: 'Teacher', 1: 'Teacher' },
-        '21:30': { 4: 'OFF', 5: 'OFF' }
-      };
-
       // ==================== STATE MANAGER ====================
       const AppState = {
         latestBooking: null,
         profile: null,
         userBookings: [],
         globalBookings: [],
+        globalSlots: [], 
         scheduleTab: 'my',
         scheduleMoving: false,
         scheduleSelectedId: null,
@@ -1540,7 +1554,7 @@
           phone: '',
           startISO: p.startISO,
           useDeferred,
-          status: 'pendingpayment' /* Force it to pending payment */
+          status: 'pendingpayment' 
         };
 
         try {
@@ -1625,23 +1639,37 @@
         if (AppState.multiBooking.length === 0) return;
         $('#appLoader').classList.remove('hidden');
 
-        let successCount = 0;
-        for (const slot of AppState.multiBooking) {
-          try {
-             const success = await createBooking(slot.dateObj, slot.timeObj, 'Beginner', true);
-             if (success) successCount++;
-          } catch (e) { console.error(e); }
-        }
-
+        try {
+          const slots = AppState.multiBooking.map(s => ({
+            dateStr: s.id.split('T')[0],
+            timeStr: s.id.split('T')[1].substring(0,5),
+            startISO: s.startISO || new Date(s.dateObj.getFullYear(), s.dateObj.getMonth(), s.dateObj.getDate(), ...s.id.split('T')[1].split(':')).toISOString()
+          }));
+          const extras = getExtras();
+          const n = extras.childName || (AppState.profile ? `${AppState.profile.firstName||''} ${AppState.profile.lastName||''}`.trim() : 'Student');
+          const p = AppState.profile ? `${AppState.profile.firstName||''} ${AppState.profile.lastName||''}`.trim() : 'Parent';
+          const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+          
+          const res = await fetch(`${API_BASE}/api/book/bulk`, {
+            method: 'POST', headers: getAuthHeaders(),
+            body: JSON.stringify({ 
+              slots, 
+              level: AppState.profile?.level || 'Beginner', 
+              email: AppState.profile?.email, 
+              childName: n, 
+              parentName: p,
+              phone: '', country: extras.country||'', timeZone: tz, childAge: extras.childAge||null
+            })
+          });
+          const data = await safeJson(res);
+          if(data.success || res.ok) {
+            showToast(`Successfully booked ${slots.length} lessons! (Pending review)`, 'good');
+            AppState.multiBooking = []; updateMultiBookBar(); await fetchScheduleData();
+          } else {
+             showToast(data.message || 'Booking failed', 'bad');
+          }
+        } catch(e) { showToast('Error', 'bad'); }
         $('#appLoader').classList.add('hidden');
-        if (successCount > 0) {
-          showToast(`Successfully booked lessons: ${successCount}`, 'good');
-          AppState.multiBooking = [];
-          updateMultiBookBar();
-          await fetchScheduleData();
-        } else {
-          showToast('Booking error', 'bad');
-        }
       });
 
       // ==================== MODAL ====================
@@ -1934,9 +1962,18 @@
           });
           const resGlobal = await fetch(`${API_BASE}/api/schedule?from=${fromStr}&to=${toStr}`);
           const dataGlobal = await safeJson(resGlobal);
-          AppState.globalBookings = dataGlobal.success && Array.isArray(dataGlobal.items)
-            ? dataGlobal.items.filter(i => i.type === 'lesson').map(i => ({ ...i, start: new Date(i.start) }))
-            : [];
+          
+          AppState.globalBookings = []; 
+          AppState.globalSlots = [];
+          
+          if (dataGlobal.success) {
+            AppState.globalBookings = Array.isArray(dataGlobal.items) 
+               ? dataGlobal.items.filter(i => i.type === 'lesson').map(i => ({ ...i, start: new Date(i.start) }))
+               : [];
+            AppState.globalSlots = Array.isArray(dataGlobal.items)
+               ? dataGlobal.items.filter(i => i.type === 'slot')
+               : [];
+          }
           
           await updateDeferredDisplay();
         } catch (e) {
@@ -2013,7 +2050,58 @@
         }
       }
 
+      // TEACHER MODAL ACTIONS
+      let tsmTargetAction = null; 
+      $('#tsmConfirmBtn').onclick = async () => {
+        if(!tsmTargetAction) return;
+        $('#teacherSlotModal').style.display='none';
+        $('#appLoader').classList.remove('hidden');
+        try {
+          if(tsmTargetAction.action === 'close') {
+            await fetch(`${API_BASE}/api/teacher/slots`, { method:'POST', headers:getAuthHeaders(), body: JSON.stringify({ kind:'oneoff', startISO: tsmTargetAction.startISO, endISO: tsmTargetAction.endISO, isActive: false }) });
+          } else if(tsmTargetAction.action === 'open') {
+            await fetch(`${API_BASE}/api/teacher/slots/${tsmTargetAction.slotId}`, { method:'DELETE', headers:getAuthHeaders() });
+          } else if (tsmTargetAction.action === 'toggle_recurring') {
+            if(tsmTargetAction.slotId) {
+              if (tsmTargetAction.delete) await fetch(`${API_BASE}/api/teacher/slots/${tsmTargetAction.slotId}`, { method:'DELETE', headers:getAuthHeaders() });
+              else await fetch(`${API_BASE}/api/teacher/slots/${tsmTargetAction.slotId}/toggle`, { method:'PATCH', headers:getAuthHeaders() });
+            } else {
+              await fetch(`${API_BASE}/api/teacher/slots`, { method:'POST', headers:getAuthHeaders(), body: JSON.stringify({ kind:'recurring', dow: tsmTargetAction.dow, startTime: tsmTargetAction.startTime, isActive: false }) });
+            }
+          }
+          await fetchScheduleData();
+        } catch(e) { showToast('Action failed', 'bad'); }
+        $('#appLoader').classList.add('hidden');
+      };
+
+      function handleTeacherSlotClick(startIsoStr, existingSlot) {
+        const startUtcMs = new Date(startIsoStr).getTime();
+        const hoursUntil = (startUtcMs - Date.now()) / 3600000;
+        if(hoursUntil < 12) { showToast('You cannot manage slots less than 12 hours in advance.', 'warn'); return; }
+
+        if(existingSlot && !existingSlot.isActive) {
+          $('#tsmText').textContent = 'Open this slot for students?';
+          tsmTargetAction = { action: 'open', slotId: existingSlot.slotId || existingSlot._id };
+        } else {
+          $('#tsmText').textContent = 'Close this slot so students cannot book it?';
+          tsmTargetAction = { action: 'close', startISO: startIsoStr, endISO: new Date(startUtcMs + 25*60000).toISOString() };
+        }
+        $('#teacherSlotModal').style.display='flex';
+      }
+
+      function handleTeacherFixedClick(dow, startTime, existingRecSlot, toDelete) {
+        if(!existingRecSlot) {
+          $('#tsmText').textContent = `Close all future ${DAYS_SHORT[dow]} at ${startTime}?`;
+          tsmTargetAction = { action: 'toggle_recurring', dow, startTime };
+        } else {
+          $('#tsmText').textContent = toDelete ? `Remove OFF block (Open for booking)?` : `Close slot?`;
+          tsmTargetAction = { action: 'toggle_recurring', slotId: existingRecSlot.slotId || existingRecSlot._id, delete: toDelete };
+        }
+        $('#teacherSlotModal').style.display='flex';
+      }
+
       function renderMyTab(container) {
+        const isTeacher = window.currentUserRole === 'teacher';
         container.className = 'schedule-timetable';
         container.style.gridTemplateColumns = `70px repeat(${MONTH_DATES.length}, 70px)`;
         container.innerHTML = '';
@@ -2056,11 +2144,17 @@
             let date = MONTH_DATES[col];
             let wd = getWeekdayIndex(date);
             const cellUtcTime = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), ...slot.split(':').map(Number));
+            const startISO = new Date(cellUtcTime).toISOString();
+            const tLocal = utcToTeacherLocal(slot);
+
             let lesson = lessonMap.get(cellUtcTime);
-            let otherLesson = null;
+            let globalLesson = null;
             if (!lesson) {
-              otherLesson = AppState.globalBookings.find(gb => gb.start && gb.start.getTime() === cellUtcTime);
+              globalLesson = AppState.globalBookings.find(gb => gb.start && gb.start.getTime() === cellUtcTime);
             }
+
+            let offSlot = AppState.globalSlots.find(s => s.kind === 'oneoff' && !s.isActive && new Date(s.startISO||s.start).getTime() === cellUtcTime);
+            if (!offSlot) offSlot = AppState.globalSlots.find(s => s.kind === 'recurring' && !s.isActive && s.dow === wd && s.startTime === tLocal);
 
             let div = document.createElement('div');
             div.className = 'schedule-cell';
@@ -2071,62 +2165,59 @@
 
             const now = Date.now();
             const hoursUntil = (cellUtcTime - now) / 3600000;
-            const teacherLocalTime = utcToTeacherLocal(slot);
-            const fixed = fixedData[teacherLocalTime]?.[wd];
             const isPending = lesson && (lesson.status === 'pendingpayment' || lesson.status === 'pending');
 
-            if (lesson) {
-              if (isPending) {
-                div.classList.add('slot-pending');
-                div.innerHTML = `<i class="fas fa-hourglass-half"></i> PENDING`;
-                div.onclick = () => { document.getElementById('pendingModal').style.display='flex'; };
+            if (isTeacher) {
+              // TEACHER VIEW
+              if (globalLesson) {
+                div.classList.add('slot-my'); div.style.background = '#1b325f';
+                div.innerHTML = `<div style="line-height:1.1">${globalLesson.childName || 'Student'}</div>`;
+              } else if (offSlot) {
+                div.classList.add('slot-off'); div.textContent = 'OFF';
+                div.onclick = () => handleTeacherSlotClick(startISO, offSlot);
               } else {
-                div.classList.add('slot-my');
-                div.innerHTML = `<i class="fas fa-user"></i> MY`;
-                if (hoursUntil < 8) div.classList.add('slot-locked');
-                if (hoursUntil > -2) div.onclick = () => openScheduleModal(lesson);
+                div.classList.add('slot-free'); div.innerHTML = '+';
+                div.onclick = () => handleTeacherSlotClick(startISO, null);
               }
-            } else if (otherLesson) {
-              div.classList.add('slot-off');
-              div.style.color = '#475569'; div.style.fontWeight = '700'; div.style.background = '#e2e8f0';
-              div.innerHTML = `<i class="fas fa-lock" style="font-size:0.55rem; color:#94a3b8;"></i> Booked`;
-            } else if (fixed) {
-              if (fixed === 'OFF') { div.classList.add('slot-off'); div.textContent = 'OFF'; }
-              else { div.classList.add('slot-fixed'); div.textContent = fixed; }
-            } else if (hoursUntil >= 8) {
-              if (AppState.scheduleMoving) {
-                div.classList.add('slot-target');
-                div.innerHTML = '<i class="fas fa-arrow-right"></i> MOVE';
-                div.onclick = () => finishMove(formatDate(date), slot);
-              } else {
-                const localDate = utcSlotToLocalDate(date, slot);
-                const localDateStr = formatDate(localDate);
-                const localTimeStr = localDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
-                const slotId = `${localDateStr}T${localTimeStr}`;
-
-                const isSelected = AppState.multiBooking.some(s => s.id === slotId);
-
-                if (isSelected) {
-                  div.classList.add('slot-selected');
-                  div.innerHTML = '<i class="fas fa-check"></i>';
+            } else {
+              // STUDENT VIEW
+              if (lesson) {
+                if (isPending) {
+                  div.classList.add('slot-pending');
+                  div.innerHTML = `<i class="fas fa-hourglass-half"></i> PENDING`;
+                  div.onclick = () => { document.getElementById('pendingModal').style.display='flex'; };
                 } else {
-                  div.classList.add('slot-free');
-                  div.innerHTML = '<i class="fas fa-plus" style="color:var(--primary);"></i>';
+                  div.classList.add('slot-my');
+                  div.innerHTML = `<i class="fas fa-user"></i> MY`;
+                  if (hoursUntil < 8) div.classList.add('slot-locked');
+                  if (hoursUntil > -2) div.onclick = () => openScheduleModal(lesson);
                 }
+              } else if (globalLesson || offSlot) {
+                div.classList.add('slot-off');
+                div.style.color = '#475569'; div.style.fontWeight = '700'; div.style.background = '#e2e8f0';
+                div.innerHTML = `<i class="fas fa-lock" style="font-size:0.55rem; color:#94a3b8;"></i> Booked`;
+              } else if (hoursUntil >= 8) {
+                if (AppState.scheduleMoving) {
+                  div.classList.add('slot-target');
+                  div.innerHTML = '<i class="fas fa-arrow-right"></i> MOVE';
+                  div.onclick = () => finishMove(formatDate(date), slot);
+                } else {
+                  const localDate = utcSlotToLocalDate(date, slot);
+                  const localDateStr = formatDate(localDate);
+                  const localTimeStr = localDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+                  const slotId = `${localDateStr}T${localTimeStr}`;
 
-                div.onclick = async () => {
-                  if (window.currentUserRole === 'teacher') {
-                    if (confirm('Change the status of this slot (Open/Close)?')) {
-                      try {
-                        const sId = slot._id || slot.id || (slot.slot && slot.slot._id);
-                        if (!sId) { showToast('Could not find slot ID', 'bad'); return; }
-                        const res = await fetch(`${API_BASE}/api/teacher/slots/${sId}/toggle`, { method: 'PATCH', headers: getAuthHeaders() });
-                        const data = await res.json();
-                        if (data.success) { showToast(data.isActive ? 'Slot OPENED' : 'Slot CLOSED', 'good'); if (typeof fetchScheduleData === 'function') fetchScheduleData(); } 
-                        else showToast(data.message || 'Error', 'bad');
-                      } catch (e) { showToast('Connection error', 'bad'); }
-                    }
+                  const isSelected = AppState.multiBooking.some(s => s.id === slotId);
+
+                  if (isSelected) {
+                    div.classList.add('slot-selected');
+                    div.innerHTML = '<i class="fas fa-check"></i>';
                   } else {
+                    div.classList.add('slot-free');
+                    div.innerHTML = '<i class="fas fa-plus" style="color:var(--primary);"></i>';
+                  }
+
+                  div.onclick = () => {
                     const idx = AppState.multiBooking.findIndex(s => s.id === slotId);
                     if (idx > -1) {
                       AppState.multiBooking.splice(idx, 1);
@@ -2134,14 +2225,14 @@
                       div.classList.add('slot-free');
                       div.innerHTML = '<i class="fas fa-plus" style="color:var(--primary);"></i>';
                     } else {
-                      AppState.multiBooking.push({ id: slotId, dateObj: localDate, timeObj: localDate });
+                      AppState.multiBooking.push({ id: slotId, dateObj: localDate, timeObj: localDate, startISO });
                       div.classList.remove('slot-free');
                       div.classList.add('slot-selected');
                       div.innerHTML = '<i class="fas fa-check"></i>';
                     }
                     updateMultiBookBar();
-                  }
-                };
+                  };
+                }
               }
             }
 
@@ -2155,6 +2246,7 @@
       }
 
       function renderFixedTab(container) {
+        const isTeacher = window.currentUserRole === 'teacher';
         container.className = 'schedule-timetable-fixed';
         container.style.gridTemplateColumns = '';
         container.setAttribute('role', 'grid');
@@ -2182,14 +2274,21 @@
           timeCell.textContent = formatTimeRange(firstDayLocal);
           frag.appendChild(timeCell);
           for (let wd=0; wd<7; wd++) {
-            const teacherLocalTime = utcToTeacherLocal(slot);
-            let fix = fixedData[teacherLocalTime]?.[wd];
+            const tLocal = utcToTeacherLocal(slot);
+            let recSlot = AppState.globalSlots.find(s => s.kind === 'recurring' && s.dow === wd && s.startTime === tLocal);
+
             let div = document.createElement('div');
             div.className = 'schedule-cell';
             div.setAttribute('role', 'gridcell');
             div.setAttribute('tabindex', '-1');
-            if (fix === 'OFF') { div.classList.add('slot-off'); div.textContent = 'OFF'; }
-            else if (fix) { div.classList.add('slot-fixed'); div.textContent = fix; }
+
+            if (recSlot && !recSlot.isActive) {
+              div.classList.add('slot-off'); div.textContent = 'OFF';
+              if(isTeacher) div.onclick = () => handleTeacherFixedClick(wd, tLocal, recSlot, true);
+            } else {
+              div.classList.add('slot-free');
+              if(isTeacher) div.onclick = () => handleTeacherFixedClick(wd, tLocal, null, false);
+            }
             frag.appendChild(div);
           }
         });
@@ -2296,10 +2395,17 @@
         if (conflict) { showToast('Slot already taken by another lesson.', 'warn'); AppState.scheduleMoving = false; renderSchedule(); return; }
         const globalConflict = AppState.globalBookings.find(gb => gb.start && gb.start.getTime() === targetUtcTime);
         if (globalConflict) { showToast('Slot already taken by another student.', 'warn'); AppState.scheduleMoving = false; renderSchedule(); return; }
+        
         const wd = getWeekdayIndex(targetDate);
         const teacherLocalTime = utcToTeacherLocal(newTime);
-        const fixed = fixedData[teacherLocalTime]?.[wd];
-        if (fixed) { showToast('Cannot move to a fixed slot.', 'warn'); AppState.scheduleMoving = false; renderSchedule(); return; }
+        
+        // Проверяем OFF через globalSlots
+        const isOff = AppState.globalSlots.find(s => 
+          (s.kind === 'recurring' && s.dow === wd && s.startTime === teacherLocalTime && !s.isActive) ||
+          (s.kind === 'oneoff' && new Date(s.startISO||s.start).getTime() === targetUtcTime && !s.isActive)
+        );
+
+        if (isOff) { showToast('Cannot move to an OFF slot.', 'warn'); AppState.scheduleMoving = false; renderSchedule(); return; }
         try {
           await rescheduleBooking(lesson._id, localTargetDate, localTargetDate, lesson.level);
           await fetchScheduleData();
@@ -2436,8 +2542,6 @@
             if(res.ok && (data?.token)){
               setToken(data.token);
               showToast('Welcome back!','good');
-              
-              // После успешного входа проверяем роль и настраиваем интерфейс
               await checkUserRoleAndSetupUI();
             }else{
               showToast(data?.message || 'Login failed','bad');
@@ -2521,7 +2625,6 @@
               window.currentUserRole = data.user.role;
               
               if (window.currentUserRole === 'teacher') {
-                // 1. Показываем основной интерфейс (убирает display:none у .container)
                 showLogin(false);
                 
                 const navCourses = document.getElementById('navCourses');
@@ -2529,24 +2632,24 @@
                 
                 const navHome = document.getElementById('navHome');
                 if (navHome) navHome.setAttribute('data-nav', 'teacher-dashboard');
+
+                // Прячем Level для учителя
+                const levelRow = document.getElementById('userLevelRow') || document.querySelector('.profile-card .level');
+                if(levelRow) levelRow.style.display = 'none';
                 
                 showView('teacher-dashboard');
                 loadTeacherDashboard();
                 
-                // 2. Скрываем спиннер для учителя!
                 document.getElementById('appLoader').classList.add('hidden');
               } else {
                 renderApp();
               }
             } else {
-              // 3. Токен просрочен или сервер вернул ошибку авторизации
-              // Очищаем локальное хранилище и перекидываем на окно логина
               clearToken();
               renderApp();
             }
           } catch (e) {
             console.error('Role check error', e);
-            // При отсутствии интернета или падении сервера тоже запускаем базовую отрисовку
             renderApp();
           }
         }
@@ -2584,8 +2687,6 @@
           }
         }
 
-        // Запуск при загрузке страницы: если есть токен, сразу проверяем роль, 
-        // если токена нет, просто рисуем форму логина.
         const token = getToken();
         if(token) {
           checkUserRoleAndSetupUI();
