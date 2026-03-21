@@ -27,6 +27,8 @@ th{font-weight:800;color:#334155}
 .status-Cancelled{background:#fef2f2;border-color:#fecaca;color:#991b1b}
 .status-No-Show{background:#fff7ed;border-color:#fed7aa;color:#9a3412}
 .status-Rescheduled{background:#f1f5f9;border-color:#cbd5e1;color:#334155}
+.status-PendingPayment{background:#fffbeb;border-color:#fde68a;color:#92400e}
+.status-Late-Cancelled{background:#fef2f2;border-color:#fca5a5;color:#b91c1c}
 .right{margin-left:auto}
 
 /* Login gate */
@@ -88,7 +90,7 @@ body.authed .wrap{display:grid}
       <div class="pill">Bookings</div>
       <select id="bStatus">
         <option value="">Any status</option>
-        <option>Scheduled</option><option>Completed</option><option>Cancelled</option>
+        <option>PendingPayment</option> <option>Scheduled</option><option>Completed</option><option>Late-Cancelled</option><option>Cancelled</option>
         <option>No-Show</option><option>Rescheduled</option>
       </select>
       <input id="bEmail" placeholder="email filter"/>
