@@ -6,11 +6,13 @@
   <meta name="robots" content="noindex, nofollow">
   <title>Grand English Courses · Student</title>
 
+  <!-- Performance: preconnect to CDNs & API -->
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
   <link rel="preconnect" href="https://static.tildacdn.com" crossorigin>
   <link rel="preconnect" href="https://teacher-application-jg52.onrender.com" crossorigin>
 
+  <!-- Non-blocking Font Awesome -->
   <link rel="preload" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" as="style" onload="this.onload=null;this.rel='stylesheet'" referrerpolicy="no-referrer">
   <noscript>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" referrerpolicy="no-referrer">
@@ -61,36 +63,40 @@
     .bg3{right:12%;top:44%;width:420px;height:320px;background-image:url('https://static.tildacdn.com/tild3766-3238-4234-a537-393137343166/__24.png');transform:scale(.88);opacity:.78}
 
    /* ===== HEADER – Minimalist Logo Only ===== */
-    .app-header {
-      background: var(--primary);
-      padding: 8px 16px; 
-      display: flex;
-      align-items: center;
-      justify-content: center; 
-      box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-      position: -webkit-sticky;
-      position: sticky;
-      top: 0;
-      z-index: 40;
-    }
+.app-header {
+  background: var(--primary);
+  padding: 8px 16px; 
+  display: flex;
+  align-items: center;
+  justify-content: center; 
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  position: -webkit-sticky;
+  position: sticky;
+  top: 0;
+  z-index: 40;
+}
 
-    .app-header .logo {
-      height: 44px; 
-      width: auto;
-      display: block;
-      margin: 0;
-      transform: scale(2.0); 
-      transform-origin: center center; 
-    }
-
-    .app-header h1 {
-      font-family: 'Montserrat', sans-serif;
-      font-size: 1.25rem;
-      font-weight: 700;
-      margin: 0;
-      letter-spacing: -0.3px;
-      color: white;
-    }
+.app-header .logo {
+  height: 44px; 
+  width: auto;
+  display: block;
+  margin: 0;
+    transform: scale(2.0); 
+    transform-origin: center center; 
+}
+  
+  transform: scale(2.0); 
+    transform-origin: left center; 
+  margin-right: 12px; 
+}
+.app-header h1 {
+  font-family: 'Montserrat', sans-serif;
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin: 0;
+  letter-spacing: -0.3px;
+  color: white;
+}
 
     /* hide header when schedule is active (toggled by JS) */
     .app-header.schedule-hidden {
@@ -108,8 +114,7 @@
       z-index: 1;
       background: var(--bg-gradient);
       padding-bottom: 100px; 
-    }
-    
+}
     /* bottom navigation */
     .bottom-nav {
       position: fixed;
@@ -213,7 +218,7 @@
       margin-top: 4px;
     }
 
-    /* buttons */
+    /* buttons – now yellow (#ffcc00) with dark blue text */
     .btn{
       display:inline-flex;
       align-items:center;
@@ -310,7 +315,7 @@
       flex-wrap:wrap
     }
 
-    /* ===== PROFILE SECTION ===== */
+    /* ===== PROFILE SECTION – REDESIGNED (no photo) ===== */
     .profile-settings-container {
       display: flex;
       flex-direction: column;
@@ -328,6 +333,7 @@
       text-align: center;
       border: 1px solid var(--gray-lighter);
     }
+    /* photo removed – now name with pulsing dot */
     .profile-card .name {
       font-weight: 800;
       font-size: 1.6rem;
@@ -435,7 +441,7 @@
       box-shadow: 0 0 0 4px var(--ring);
     }
 
-    /* ===== LOGIN OVERLAY ===== */
+    /* ===== LOGIN OVERLAY – ANIMATION (falling logo + fade) ===== */
     .login-overlay{position:fixed;inset:0;background:rgba(255,255,255,0.9);backdrop-filter:blur(8px);display:none;align-items:center;justify-content:center;padding:28px;z-index:100}
     .login-overlay.active{display:flex}
     .login-card{width:min(100%, 420px);background:#fff;border-radius:48px;box-shadow:0 30px 60px rgba(0,0,0,0.2);padding:36px 28px; text-align:center; animation: fadeInUp 0.6s ease-out;}
@@ -445,14 +451,16 @@
       transform-origin: top;
       margin-bottom: 20px;
     }
-    .login-card label {
-      display: block;
-      text-align: left;
-      font-weight: 600;
-      margin-bottom: 6px;
-      font-size: 0.9rem;
-      color: var(--dark);
-    }
+/* Выравниваем тексты над инпутами по левому краю */
+.login-card label {
+  display: block;
+  text-align: left;
+  font-weight: 600;
+  margin-bottom: 6px;
+  font-size: 0.9rem;
+  color: var(--dark); /* или любой другой подходящий цвет */
+}
+
     @keyframes dropFall {
       0% { transform: translateY(-200px) rotate(-5deg); opacity: 0; }
       70% { transform: translateY(8px) rotate(2deg); }
@@ -477,7 +485,7 @@
     }
     .form-actions{margin-top:24px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
 
-    /* toasts */
+    /* toasts – now with transition for smooth fade */
     .toasts{position:fixed;top:80px;right:16px;display:flex;flex-direction:column;gap:8px;z-index:200; max-width:320px;}
     .toast{
       background:#1e293b;
@@ -496,7 +504,7 @@
     .toast.good{background:var(--success);}
     .toast.bad{background:var(--danger);}
 
-    /* ===== SCHEDULE STYLES ===== */
+    /* ===== SCHEDULE STYLES – FIXED GRID CLEANED ===== */
     .schedule-container {
       width: 100%;
       background: white;
@@ -535,6 +543,7 @@
       background: var(--primary);
       color: white;
     }
+    /* Cancel move button – now inline, no overlap */
     .cancel-move-btn {
       background: var(--gray-light);
       border: none;
@@ -577,6 +586,7 @@
       border-top: 1px solid var(--gray-light);
       background: white;
     }
+   /* Accessibility: grid roles */
     .schedule-timetable,
     .schedule-timetable-fixed {
       display: grid;
@@ -585,6 +595,11 @@
       width: max-content; 
       min-width: 100%;
     }
+    
+    .schedule-timetable {
+      /* columns set by JS */
+    }
+    
     .schedule-timetable-fixed {
       grid-template-columns: 70px repeat(7, 70px);
     }
@@ -605,7 +620,7 @@
     .schedule-header-cell {
       background: #f8f9fc !important;
       color: #1b325f !important;
-      border-bottom: 2px solid #e2e8f0;
+      border-bottom: border-bottom: 2px solid #e2e8f0;
       display: flex;
       flex-direction: column;
       padding: 8px 2px;
@@ -627,11 +642,9 @@
       z-index: 35;
       font-size: 0.6rem;
     }
-    .schedule-header-cell.schedule-time-col {
-      z-index: 40 !important;
-    }
-    
-    /* --- НОВЫЕ И ОБНОВЛЕННЫЕ КЛАССЫ СЛОТОВ --- */
+.schedule-header-cell.schedule-time-col {
+  z-index: 40 !important;
+}
     .slot-my {
       background: var(--primary) !important;
       color: white;
@@ -642,7 +655,7 @@
       margin: 2px;
       box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
-    .slot-pending {
+.slot-pending {
       background: #fef3c7 !important;
       color: #92400e !important;
       border: 1px dashed #f59e0b !important;
@@ -708,7 +721,7 @@
       display: none;
       align-items: center;
       justify-content: center;
-      z-index: 500;
+      z-index: 300;
       padding: 16px;
     }
     .schedule-modal-card {
@@ -783,10 +796,12 @@
 </head>
 <body>
 
+  <!-- Loading Spinner -->
   <div class="app-loader" id="appLoader">
     <div class="spinner"></div>
   </div>
 
+  <!-- Decorative bg -->
   <div class="bg-line bg1" aria-hidden="true"></div>
   <div class="bg-line bg2" aria-hidden="true"></div>
   <div class="bg-line bg3" aria-hidden="true"></div>
@@ -797,13 +812,16 @@
     </div>
   </noscript>
 
+  <!-- Redesigned header: larger logo, compact, modern font -->
   <div class="app-header" id="mainHeader">
     <img class="logo" src="https://static.tildacdn.com/tild3664-6534-4439-b436-356535353334/ge_logo_white_text.png" alt="Grand English Courses" loading="lazy" decoding="async" fetchpriority="low">
   </div>
 
+  <!-- Main container (hidden initially) -->
   <div class="container" style="display:none">
     <main class="content">
 
+      <!-- DASHBOARD VIEW -->
       <section id="view-dashboard" class="grid">
         <div class="grid stats">
           <div class="card">
@@ -875,6 +893,7 @@
         </section>
       </section>
 
+      <!-- COURSES VIEW -->
       <section id="view-courses" class="view card" style="display:none">
         <div class="empty-state">
           <i class="fas fa-book-open"></i>
@@ -884,6 +903,7 @@
       </section>
 
       <section id="view-teacher-dashboard" class="view grid" style="display: none;">
+        
         <div class="grid stats">
           <div class="card">
             <div class="card-header">
@@ -912,8 +932,10 @@
             <div style="text-align: center; color: #6b7280; font-size: 14px; padding: 10px;">Загрузка...</div>
           </div>
         </div>
+        
       </section>
 
+      <!-- SCHEDULE VIEW (fully functional, fixed grid untouched) -->
       <section id="view-schedule" class="card" style="display:none; padding:0; background:transparent; box-shadow:none;">
         <div class="schedule-container">
           <div style="text-align:center; font-weight:600; margin-top:16px; font-size:1rem; color:var(--dark);" id="scheduleMonthDisplay"></div>
@@ -933,8 +955,11 @@
             <span><span class="legend-dot" style="background:#b34141;"></span> Locked (&lt;8h)</span>
             <span><span class="legend-dot" style="background:#ffd966;"></span> Fixed</span>
             <span><span class="legend-dot" style="background:#e2ebf2;"></span> OFF</span>
+            <span><span class="legend-dot" style="background:#ffb347;"></span> Move target</span>
             <span><span class="legend-dot" style="background:#fff; border:1px dashed var(--primary);"></span> Free</span>
+            <span><i class="fas fa-lock"></i> 8H lock</span>
           </div>
+          <!-- New deferred counter display (now from server) -->
           <div style="display:flex; justify-content:space-between; margin:0 12px 8px; padding:8px 16px; background:var(--gray-lighter); border-radius:40px; font-size:0.75rem;">
             <span><i class="fas fa-calendar-check"></i> Lessons this month: <strong id="scheduleLessonCount">0</strong></span>
             <span><i class="fas fa-calendar-plus"></i> Deferred for next month: <strong id="deferredCounter">0/2</strong></span>
@@ -942,10 +967,10 @@
           <div class="schedule-grid-wrapper">
             <div id="scheduleGrid" class="schedule-timetable" role="grid" aria-label="Weekly schedule"></div>
           </div>
+          <!-- Removed the extra bottom counter block -->
         </div>
       </section>
-
-      <div id="multiBookBar" style="display:none; position:fixed; bottom:80px; left:50%; transform:translateX(-50%); background:var(--primary); color:white; padding:12px 24px; border-radius:40px; z-index:400; box-shadow:0 10px 25px rgba(0,0,0,0.3); align-items:center; gap:16px;">
+<div id="multiBookBar" style="display:none; position:fixed; bottom:80px; left:50%; transform:translateX(-50%); background:var(--primary); color:white; padding:12px 24px; border-radius:40px; z-index:400; box-shadow:0 10px 25px rgba(0,0,0,0.3); align-items:center; gap:16px;">
         <span id="multiBookCount" style="font-weight:600; white-space:nowrap;">Выбрано: 0</span>
         <button id="btnMultiBook" class="btn" style="padding:8px 16px; font-size:0.85rem; border-radius:20px;">Забронировать</button>
         <button id="btnMultiCancel" style="background:transparent; color:rgba(255,255,255,0.8); border:none; cursor:pointer; font-size:1.2rem; display:flex; align-items:center; justify-content:center;"><i class="fas fa-times"></i></button>
@@ -960,12 +985,14 @@
         </div>
       </div>
 
+      <!-- SCHEDULE MODAL (with ARIA roles) -->
       <div class="schedule-modal" id="scheduleLessonModal" role="dialog" aria-modal="true" aria-labelledby="scheduleModalTitle">
         <div class="schedule-modal-card">
           <h4 id="scheduleModalTitle" style="margin-top:0; display:flex; align-items:center; gap:8px; color:var(--primary);"><i class="fas fa-pencil-alt"></i> Lesson</h4>
           <div style="background:var(--gray-lighter); padding:12px; border-radius:18px; font-size:0.9rem; font-weight:600; margin-bottom:12px;" id="scheduleModalInfo"></div>
           <div class="lock-warn" id="scheduleLockWarning" style="background:#ffe8d9; border-radius:14px; padding:10px; font-size:0.8rem; color:#874d00; margin:8px 0; display:none;"><i class="fas fa-lock"></i> Locked: less than 8h – only cancellation allowed</div>
           
+          <!-- Dynamic buttons based on time -->
           <button class="modal-btn btn-resched" id="scheduleRescheduleBtn" style="width:100%; padding:14px; border-radius:24px; border:none; background:var(--primary); color:white; font-weight:600; margin-top:8px; display:flex; align-items:center; justify-content:center; gap:8px;"><i class="fas fa-arrows-alt"></i> Reschedule</button>
           <button class="modal-btn btn-move" id="scheduleMoveBtn" style="width:100%; padding:14px; border-radius:24px; border:none; background:var(--warning); color:white; font-weight:600; margin-top:8px; display:flex; align-items:center; justify-content:center; gap:8px;"><i class="fas fa-calendar-plus"></i> Move to next month</button>
           <button class="modal-btn btn-cancel" id="scheduleCancelBtn" style="width:100%; padding:14px; border-radius:24px; border:none; background:#ffe3e3; color:#b34141; font-weight:600; margin-top:8px; display:flex; align-items:center; justify-content:center; gap:8px;"><i class="fas fa-ban"></i> Cancel lesson</button>
@@ -973,6 +1000,7 @@
         </div>
       </div>
 
+      <!-- ===== REUSABLE MODAL FOR BOOKING (added) ===== -->
       <div id="bookingModal" class="schedule-modal" role="dialog" aria-modal="true" aria-labelledby="bookingModalTitle" style="display:none;">
         <div class="schedule-modal-card">
           <h4 id="bookingModalTitle" style="margin-top:0; display:flex; align-items:center; gap:8px; color:var(--primary);"><i class="fas fa-calendar-plus"></i> <span id="bookingModalTitleText">Book your lesson</span></h4>
@@ -987,6 +1015,7 @@
         </div>
       </div>
 
+      <!-- MESSAGES VIEW -->
       <section id="view-messages" class="card" style="display:none">
         <div class="empty-state">
           <i class="fas fa-comments"></i>
@@ -994,6 +1023,7 @@
         </div>
       </section>
 
+      <!-- PROGRESS VIEW -->
       <section id="view-progress" class="card" style="display:none">
         <div class="empty-state">
           <i class="fas fa-chart-bar"></i>
@@ -1001,8 +1031,10 @@
         </div>
       </section>
 
+      <!-- PROFILE VIEW – REDESIGNED (no photo, added pulsing dot) -->
       <section id="view-settings" class="card settings-panel" style="display:none; padding:0; background:transparent; box-shadow:none;">
         <div class="profile-settings-container">
+          <!-- Profile Card (photo removed) -->
           <div class="profile-card">
             <div class="name" id="userFullName">
               — <span class="online-dot"></span>
@@ -1012,9 +1044,11 @@
             <div class="level" id="userLevel">No level yet</div>
           </div>
 
+          <!-- Account Settings Card (avatar upload removed) -->
           <div class="settings-card">
             <h3><i class="fas fa-cog"></i> Account Settings</h3>
             <form id="settingsForm">
+              <!-- avatar upload section completely removed -->
               <div class="form-group">
                 <label for="inpFirstName">First Name</label>
                 <input id="inpFirstName" class="form-control" type="text" placeholder="First name" />
@@ -1034,6 +1068,7 @@
             </form>
           </div>
 
+          <!-- Logout Card -->
           <div class="logout-card">
             <button class="btn btn-danger" id="profileLogoutBtn" style="width:100%;"><i class="fas fa-sign-out-alt"></i> Sign out</button>
           </div>
@@ -1042,6 +1077,7 @@
     </main>
   </div>
 
+  <!-- BOTTOM NAVIGATION BAR -->
   <div class="bottom-nav">
     <button class="nav-item" data-nav="dashboard" id="navHome"><i class="fas fa-home"></i><span>Home</span></button>
     <button class="nav-item" data-nav="courses" id="navCourses"><i class="fas fa-book-open"></i><span>Courses</span></button>
@@ -1049,6 +1085,7 @@
     <button class="nav-item" data-nav="settings" id="navProfile"><i class="fas fa-user"></i><span>Profile</span></button>
   </div>
 
+  <!-- LOGIN OVERLAY – ANIMATED (falling logo + fade-in form) -->
   <div id="loginOverlay" class="login-overlay" role="dialog" aria-modal="true" aria-labelledby="loginTitle">
     <div class="login-card">
       <div class="falling-logo">
@@ -1057,9 +1094,9 @@
       <div class="login-form">
         <div id="loginTitle" class="login-title">Log into your account</div>
         <form id="loginForm">
-          <label for="loginEmail">Email</label>
+          <label for="loginEmail" style="font-weight:600;display:block;margin-bottom:6px">Email</label>
           <input id="loginEmail" class="form-control" type="email" placeholder="you@example.com" required>
-          <label for="loginPassword" style="margin-top:16px;">Password</label>
+          <label for="loginPassword" style="font-weight:600;display:block;margin:16px 0 6px">Password</label>
           <input id="loginPassword" class="form-control" type="password" placeholder="••••••••" required>
           <div class="form-actions">
             <a class="btn btn-muted" href="https://grandenglishcourses.com/trial_form" target="_blank" rel="noopener">Sign up</a>
@@ -1080,10 +1117,10 @@
       const LS_BOOKING_KEY = 'latestBookingCache';
       const LS_EXTRAS_KEY = 'studentProfileExtras';
 
-      // Teacher availability
+      // Teacher availability (local time, now 13:00 to 22:00)
       const TEACHER_LOCAL_START = 13;
       const TEACHER_LOCAL_END = 22;
-      const TEACHER_UTC_OFFSET = 5; 
+      const TEACHER_UTC_OFFSET = 5; // teacher's fixed UTC offset
       const UTC_START = TEACHER_LOCAL_START - TEACHER_UTC_OFFSET;
       const UTC_END = TEACHER_LOCAL_END - TEACHER_UTC_OFFSET;
       const SLOT_DURATION = 30;
@@ -1095,6 +1132,7 @@
         }
       }
 
+      // Fixed slots keyed by TEACHER LOCAL TIME (HH:MM)
       const fixedData = {
         '19:00': { 0: 'Teacher', 1: 'Teacher' },
         '21:30': { 4: 'OFF', 5: 'OFF' }
@@ -1109,9 +1147,9 @@
         scheduleTab: 'my',
         scheduleMoving: false,
         scheduleSelectedId: null,
-        flatpickrInstances: [],
+        flatpickrInstances: [], 
         flatpickrLoadingPromise: null,
-        multiBooking: [] // <--- НОВОЕ: массив для массового выбора
+        multiBooking: [] // <--- Добавили массив для хранения выбранных слотов
       };
 
       // ==================== UTILITIES ====================
@@ -1130,10 +1168,6 @@
         wrap.appendChild(el);
         setTimeout(()=>{ el.style.opacity='0'; el.style.transform='translateY(8px)'; }, 2600);
         setTimeout(()=>{ wrap.removeChild(el); }, 3200);
-      }
-
-      function getAuthHeaders() {
-        return { 'Content-Type': 'application/json', Authorization: 'Bearer ' + getToken() };
       }
 
       const getExtras = () => { try{ return JSON.parse(localStorage.getItem(LS_EXTRAS_KEY) || '{}'); }catch(_){ return {}; } };
@@ -1265,6 +1299,7 @@
         }
       }
 
+      // Helper to safely get nested property value using a path string (e.g., "child.age")
       function getNestedValue(obj, path) {
         if (!obj || typeof obj !== 'object') return undefined;
         const cleanPath = path.replace(/\?\./g, '.');
@@ -1314,7 +1349,18 @@
           }
         }
 
-        return { _id: id, dateStr, timeStr, level, timeZone, country, childAge: childAge ?? null, childName, status, start: startDate };
+        return {
+          _id: id,
+          dateStr: dateStr,
+          timeStr: timeStr,
+          level: level,
+          timeZone: timeZone,
+          country: country,
+          childAge: childAge ?? null,
+          childName: childName,
+          status: status,
+          start: startDate
+        };
       }
 
       async function loadBookings(token){
@@ -1322,8 +1368,8 @@
           const res = await fetchWithTimeout(`${API_BASE}/api/my-bookings`, { headers:{Authorization:'Bearer '+token} }, 7000);
           const data = await safeJson(res);
           const arr = Array.isArray(data?.bookings) ? data.bookings
-                    : (Array.isArray(data) ? data
-                    : (Array.isArray(data?.items) ? data.items : []));
+                   : (Array.isArray(data) ? data
+                   : (Array.isArray(data?.items) ? data.items : []));
           if (res.status === 401) {
             clearToken();
             cacheBooking({});
@@ -1364,7 +1410,14 @@
 
       function buildDatePayload(dateObj, timeObj) {
         const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
-        const localDate = new Date(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate(), timeObj.getHours(), timeObj.getMinutes(), 0, 0);
+        const localDate = new Date(
+          dateObj.getFullYear(),
+          dateObj.getMonth(),
+          dateObj.getDate(),
+          timeObj.getHours(),
+          timeObj.getMinutes(),
+          0, 0
+        );
         const year = localDate.getFullYear();
         const month = String(localDate.getMonth() + 1).padStart(2, '0');
         const day = String(localDate.getDate()).padStart(2, '0');
@@ -1372,14 +1425,20 @@
         const minutes = String(localDate.getMinutes()).padStart(2, '0');
         const localDateStr = `${year}-${month}-${day}`;
         const localTimeStr = `${hours}:${minutes}`;
-        const startISO = localDate.toISOString(); 
+        const startISO = localDate.toISOString(); // UTC ISO string
         const offset = -localDate.getTimezoneOffset();
         const sign = offset >= 0 ? '+' : '-';
         const absOffset = Math.abs(offset);
         const offsetHours = String(Math.floor(absOffset / 60)).padStart(2,'0');
         const offsetMinutes = String(absOffset % 60).padStart(2,'0');
         const tzOffset = `${sign}${offsetHours}:${offsetMinutes}`;
-        return { date: localDateStr, time: localTimeStr, startISO, tz, tzOffset };
+        return {
+          date: localDateStr,
+          time: localTimeStr,
+          startISO,
+          tz,
+          tzOffset
+        };
       }
 
       async function cancelBooking(id){
@@ -1423,7 +1482,14 @@
           res = await fetch(`${API_BASE}/api/bookings/${id}/reschedule`, {
             method:'POST',
             headers:{ 'Content-Type':'application/json', Authorization:'Bearer '+token },
-            body: JSON.stringify({ level, startISO: p.startISO, timeZone: p.tz, tzOffset: p.tzOffset, date: p.date, time: p.time })
+            body: JSON.stringify({
+              level,
+              startISO: p.startISO,
+              timeZone: p.tz,
+              tzOffset: p.tzOffset,
+              date: p.date,
+              time: p.time
+            })
           });
         }catch(_){
           showToast('Network error','bad'); return;
@@ -1438,22 +1504,28 @@
           await loadBookings(token);
         }else{
           const msg = data?.message || data?.error || 'Reschedule failed';
+          console.error('Booking reschedule error:', {status: res?.status, data});
           showToast(msg, 'bad');
         }
       }
 
+      // NEW: fetch deferred count for a given month (YYYY-MM)
       async function fetchDeferredCount(month) {
         const token = getToken();
         if (!token) return 0;
         try {
-          const res = await fetch(`${API_BASE}/api/student/deferred?month=${month}`, { headers: { Authorization: 'Bearer ' + token } });
+          const res = await fetch(`${API_BASE}/api/student/deferred?month=${month}`, {
+            headers: { Authorization: 'Bearer ' + token }
+          });
           const data = await safeJson(res);
           return data.success ? data.count : 0;
         } catch (e) {
+          console.error('fetchDeferredCount error', e);
           return 0;
         }
       }
 
+      // NEW: move lesson to next month
       async function moveToNextMonth(bookingId) {
         const token = getToken();
         try {
@@ -1464,7 +1536,7 @@
           const data = await safeJson(res);
           if (res.ok) {
             showToast('Lesson moved to next month', 'good');
-            await fetchScheduleData(); 
+            await fetchScheduleData(); // refresh
           } else {
             showToast(data?.message || 'Move failed', 'bad');
           }
@@ -1473,13 +1545,15 @@
         }
       }
 
-      // --- ИЗМЕНЕНИЕ 1: Добавлен аргумент skipRefetch ---
-      async function createBooking(dateObj, timeObj, level = 'Beginner', skipRefetch = false) {
+async function createBooking(dateObj, timeObj, level = 'Beginner', skipRefetch = false) {
         const token = getToken();
-        if (!token) { showToast('You must be logged in', 'bad'); return false; }
+        if (!token) { showToast('You must be logged in', 'bad'); return; }
         if (!AppState.profile) {
           await loadProfile(token);
-          if (!AppState.profile) { showToast('Profile not loaded. Please refresh.', 'bad'); return false; }
+          if (!AppState.profile) {
+            showToast('Profile not loaded. Please refresh.', 'bad');
+            return;
+          }
         }
         const extras = getExtras();
         const childName = extras.childName || (AppState.profile ? `${AppState.profile.firstName || ''} ${AppState.profile.lastName || ''}`.trim() : 'Student');
@@ -1489,11 +1563,25 @@
         const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
         const p = buildDatePayload(dateObj, timeObj);
 
+        // Check if we have deferred credits for this month
         const monthKey = `${dateObj.getFullYear()}-${String(dateObj.getMonth()+1).padStart(2,'0')}`;
         const deferredCount = await fetchDeferredCount(monthKey);
         const useDeferred = deferredCount > 0;
 
-        const body = { email: AppState.profile?.email || '', childName, parentName, childAge, country, timeZone, date: p.date, time: p.time, level, phone: '', startISO: p.startISO, useDeferred };
+        const body = {
+          email: AppState.profile?.email || '',
+          childName,
+          parentName,
+          childAge,
+          country,
+          timeZone,
+          date: p.date,
+          time: p.time,
+          level,
+          phone: '',
+          startISO: p.startISO,
+          useDeferred
+        };
 
         try {
           const res = await fetch(`${API_BASE}/api/book`, {
@@ -1512,17 +1600,22 @@
             if (!skipRefetch) showToast(data?.message || 'Booking failed', 'bad');
             return false;
           }
-        } catch (e) {
-          if (!skipRefetch) showToast('Network error', 'bad');
-          return false;
-        }
-      }
 
       async function createTrialBooking(dateObj, timeObj, level='Beginner'){
         const token = getToken();
         const payloadBase = buildDatePayload(dateObj, timeObj);
         const extras = getExtras();
-        const body = { level, startISO: payloadBase.startISO, timeZone: payloadBase.tz, tzOffset: payloadBase.tzOffset, date: payloadBase.date, time: payloadBase.time, studentName: extras.childName || extras.studentName || '', childAge: extras.childAge ?? null, country: extras.country || '' };
+        const body = {
+          level,
+          startISO: payloadBase.startISO,
+          timeZone: payloadBase.tz,
+          tzOffset: payloadBase.tzOffset,
+          date: payloadBase.date,
+          time: payloadBase.time,
+          studentName: extras.childName || extras.studentName || '',
+          childAge: extras.childAge ?? null,
+          country: extras.country || ''
+        };
         let res;
         try{
           res = await fetch(`${API_BASE}/api/bookings/trial`, {
@@ -1531,7 +1624,8 @@
             body: JSON.stringify(body)
           });
         }catch(_){
-          showToast('Network error','bad'); return;
+          showToast('Network error','bad');
+          return;
         }
         let data = {};
         try{ data = await safeJson(res); }catch(_){}
@@ -1541,11 +1635,12 @@
           return;
         }
         const msg = (data && (data.message || data.error || data.detail)) || 'Booking failed';
+        console.error('Booking create error:', {status: res?.status, data, sent: body});
         showToast(msg, 'bad');
         throw new Error(msg);
       }
 
-      // ==================== MULTI-BOOKING LOGIC ====================
+// ==================== MULTI-BOOKING LOGIC ====================
       function updateMultiBookBar() {
         const bar = $('#multiBookBar');
         const countLabel = $('#multiBookCount');
@@ -1568,7 +1663,6 @@
         $('#appLoader').classList.remove('hidden');
 
         let successCount = 0;
-        // Запускаем последовательно, чтобы кредиты пересчитывались корректно
         for (const slot of AppState.multiBooking) {
           try {
              const success = await createBooking(slot.dateObj, slot.timeObj, 'Beginner', true);
@@ -1587,14 +1681,13 @@
         }
       });
 
-
-      // ==================== MODALS ====================
+      // ==================== MODAL (FIX #1) ====================
       const bookingModal = $('#bookingModal');
       const modalPickDate = $('#modalPickDate');
       const modalPickTime = $('#modalPickTime');
       const modalCancel = $('#modalCancel');
       const modalSave = $('#modalSave');
-      let currentOnSave = null;
+      let currentOnSave = null; // callback for current modal instance
 
       function openBookingModal(initial = {date:'', time:''}, onSave) {
         const titleSpan = $('#bookingModalTitleText');
@@ -1604,13 +1697,31 @@
 
         loadFlatpickrOnce()
           .then(() => {
-            const fpDate = flatpickr(modalPickDate, { dateFormat: 'Y-m-d', altInput: true, altFormat: 'l, F j, Y', defaultDate: initial.date || (AppState.latestBooking?.dateStr || '') });
-            const fpTime = flatpickr(modalPickTime, { enableTime: true, noCalendar: true, time_24hr: false, dateFormat: 'H:i', altInput: true, altFormat: 'h:i K', defaultDate: initial.time || (AppState.latestBooking?.timeStr || ''), minuteIncrement: 30 });
+            const fpDate = flatpickr(modalPickDate, {
+              dateFormat: 'Y-m-d',
+              altInput: true,
+              altFormat: 'l, F j, Y',
+              defaultDate: initial.date || (AppState.latestBooking?.dateStr || '')
+            });
+            const fpTime = flatpickr(modalPickTime, {
+              enableTime: true,
+              noCalendar: true,
+              time_24hr: false,
+              dateFormat: 'H:i',
+              altInput: true,
+              altFormat: 'h:i K',
+              defaultDate: initial.time || (AppState.latestBooking?.timeStr || ''),
+              minuteIncrement: 30
+            });
             AppState.flatpickrInstances.push(fpDate, fpTime);
+
             currentOnSave = onSave;
+
             bookingModal.style.display = 'flex';
           })
-          .catch(err => { showToast('Date picker failed to load. Please refresh.', 'bad'); });
+          .catch(err => {
+            showToast('Date picker failed to load. Please refresh.', 'bad');
+          });
       }
 
       modalCancel.onclick = () => {
@@ -1624,36 +1735,59 @@
         if (!currentOnSave) return;
         const dateObj = AppState.flatpickrInstances[0]?.selectedDates[0] || (modalPickDate.value ? new Date(modalPickDate.value) : null);
         const timeObj = AppState.flatpickrInstances[1]?.selectedDates[0] || (modalPickTime.value ? new Date(`1970-01-01T${modalPickTime.value}:00`) : null);
-        if (!dateObj || !timeObj) { showToast('Pick date and time', 'warn'); return; }
-        try { await currentOnSave({ dateObj, timeObj }); modalCancel.click(); } catch (e) {}
+        if (!dateObj || !timeObj) {
+          showToast('Pick date and time', 'warn');
+          return;
+        }
+        try {
+          await currentOnSave({ dateObj, timeObj });
+          modalCancel.click();
+        } catch (e) {}
       };
 
+      // ==================== FLATPICKR LOADER ====================
       function loadFlatpickrOnce() {
         if (window.flatpickr) return Promise.resolve();
         if (AppState.flatpickrLoadingPromise) return AppState.flatpickrLoadingPromise;
+
         AppState.flatpickrLoadingPromise = new Promise((resolve, reject) => {
-          const timeout = setTimeout(() => { reject(new Error('Flatpickr load timeout')); AppState.flatpickrLoadingPromise = null; }, 5000);
+          const timeout = setTimeout(() => {
+            reject(new Error('Flatpickr load timeout'));
+            AppState.flatpickrLoadingPromise = null;
+          }, 5000);
           const script = document.createElement('script');
           script.src = 'https://cdn.jsdelivr.net/npm/flatpickr';
           script.defer = true;
-          script.onload = () => { clearTimeout(timeout); resolve(); AppState.flatpickrLoadingPromise = null; };
-          script.onerror = () => { clearTimeout(timeout); reject(new Error('Flatpickr failed to load')); AppState.flatpickrLoadingPromise = null; };
+          script.onload = () => {
+            clearTimeout(timeout);
+            resolve();
+            AppState.flatpickrLoadingPromise = null;
+          };
+          script.onerror = () => {
+            clearTimeout(timeout);
+            reject(new Error('Flatpickr failed to load'));
+            AppState.flatpickrLoadingPromise = null;
+          };
           document.head.appendChild(script);
 
           const link = document.createElement('link');
-          link.rel = 'stylesheet'; link.href = 'https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css';
-          link.media = 'print'; link.onload = () => { link.media = 'all'; };
+          link.rel = 'stylesheet';
+          link.href = 'https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css';
+          link.media = 'print';
+          link.onload = () => { link.media = 'all'; };
           document.head.appendChild(link);
         });
         return AppState.flatpickrLoadingPromise;
       }
 
+      // ==================== RENDER BOOKING CARD ====================
       function renderBookingCardFrom(b){
         if(!b){ ensureTrial(); return; }
         const extras = getExtras();
         let dateTimeStr = '—';
         if (b.start && !isNaN(b.start)) {
-          dateTimeStr = b.start.toLocaleDateString(undefined, { weekday:'long', year:'numeric', month:'long', day:'numeric' }) + ' at ' + b.start.toLocaleTimeString(undefined, { hour:'numeric', minute:'2-digit' });
+          dateTimeStr = b.start.toLocaleDateString(undefined, { weekday:'long', year:'numeric', month:'long', day:'numeric' }) +
+                        ' at ' + b.start.toLocaleTimeString(undefined, { hour:'numeric', minute:'2-digit' });
         } else {
           dateTimeStr = `${b.dateStr || ''}${b.timeStr ? ' at ' + b.timeStr : ''}`;
         }
@@ -1684,7 +1818,9 @@
             userFullNameEl.innerHTML = '';
             userFullNameEl.appendChild(document.createTextNode(fullName));
             userFullNameEl.appendChild(document.createTextNode(' '));
-            const dot = document.createElement('span'); dot.className = 'online-dot'; userFullNameEl.appendChild(dot);
+            const dot = document.createElement('span');
+            dot.className = 'online-dot';
+            userFullNameEl.appendChild(dot);
           }
         }
       }
@@ -1693,27 +1829,49 @@
         const b = AppState.latestBooking;
         const resBtn = $('#btnReschedule');
         const cancelBtn = $('#btnCancel');
-        if(cancelBtn){ const newCancel = cancelBtn.cloneNode(true); cancelBtn.parentNode.replaceChild(newCancel, cancelBtn); }
-        if(resBtn){ const newRes = resBtn.cloneNode(true); resBtn.parentNode.replaceChild(newRes, resBtn); }
+        if(cancelBtn){ 
+          const newCancel = cancelBtn.cloneNode(true);
+          cancelBtn.parentNode.replaceChild(newCancel, cancelBtn);
+        }
+        if(resBtn){ 
+          const newRes = resBtn.cloneNode(true);
+          resBtn.parentNode.replaceChild(newRes, resBtn);
+        }
         const _cancelBtn = $('#btnCancel');
         const _resBtn = $('#btnReschedule');
         if(_cancelBtn){
           _cancelBtn.onclick = ()=>{
             if(getBookingState(AppState.latestBooking) !== 'upcoming'){ showToast('No upcoming booking to cancel','warn'); return; }
             confirmBox('Cancel this booking?', async (ok) => {
-              if(ok) { try { await cancelBooking(b._id); } catch (e) { showToast('Cancel failed', 'bad'); } }
+              if(ok) {
+                try {
+                  await cancelBooking(b._id);
+                } catch (e) {
+                  showToast('Cancel failed', 'bad');
+                }
+              }
             });
           };
         }
         if(_resBtn){
           _resBtn.onclick = async ()=>{
-            if(getBookingState(AppState.latestBooking) !== 'upcoming'){ $('#btnBookTrial')?.click(); return; }
+            if(getBookingState(AppState.latestBooking) !== 'upcoming'){
+              $('#btnBookTrial')?.click();
+              return;
+            }
             if (b.start) {
               const diffHours = (b.start.getTime() - Date.now()) / 3600000;
-              if (diffHours < 8) { showToast('Cannot reschedule less than 8 hours before the lesson.', 'warn'); return; }
+              if (diffHours < 8) {
+                showToast('Cannot reschedule less than 8 hours before the lesson.', 'warn');
+                return;
+              }
             }
             await openBookingModal({}, async ({dateObj, timeObj})=>{
-              try { await rescheduleBooking(b._id, dateObj, timeObj, b.level||'Beginner'); } catch (e) { showToast('Reschedule failed', 'bad'); }
+              try {
+                await rescheduleBooking(b._id, dateObj, timeObj, b.level||'Beginner');
+              } catch (e) {
+                showToast('Reschedule failed', 'bad');
+              }
             });
           };
         }
@@ -1722,8 +1880,10 @@
       function confirmBox(text, cb){
         const overlay = document.createElement('div');
         overlay.style.position='fixed'; overlay.style.inset='0'; overlay.style.background='rgba(0,0,0,.35)';
-        overlay.style.zIndex='70'; overlay.style.display='flex'; overlay.style.alignItems='center'; overlay.style.justifyContent='center'; overlay.style.padding='16px';
-        overlay.setAttribute('role', 'dialog'); overlay.setAttribute('aria-modal', 'true');
+        overlay.style.zIndex='70'; overlay.style.display='flex'; overlay.style.alignItems='center'; overlay.style.justifyContent='center';
+        overlay.style.padding='16px';
+        overlay.setAttribute('role', 'dialog');
+        overlay.setAttribute('aria-modal', 'true');
         overlay.innerHTML = `
           <div style="background:#fff;border-radius:24px;box-shadow:var(--card-shadow);width:min(92vw,420px);padding:24px">
             <div style="font-weight:800;font-size:1.1rem;margin-bottom:16px">${text}</div>
@@ -1743,11 +1903,19 @@
       const currentMonth = now.getMonth();
       const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
       const MONTH_DATES = [];
-      for (let i = 1; i <= daysInMonth; i++) { MONTH_DATES.push(new Date(currentYear, currentMonth, i)); }
+      for (let i = 1; i <= daysInMonth; i++) {
+        MONTH_DATES.push(new Date(currentYear, currentMonth, i));
+      }
       const DAYS_SHORT = ['MON','TUE','WED','THU','FRI','SAT','SUN'];
 
-      function formatDate(d) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+      function formatDate(d) {
+        let y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), day = String(d.getDate()).padStart(2,'0');
+        return `${y}-${m}-${day}`;
+      }
       function getWeekdayIndex(date) { let day = date.getDay(); return day === 0 ? 6 : day - 1; }
+      function getLocalTimeStr(date) {
+        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+      }
       function utcSlotToLocalDate(date, utcTimeStr) {
         const [hour, minute] = utcTimeStr.split(':').map(Number);
         return new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), hour, minute, 0));
@@ -1773,7 +1941,8 @@
       }
 
       function getNextMonthKey() {
-        const d = new Date(); d.setMonth(d.getMonth() + 1);
+        const d = new Date();
+        d.setMonth(d.getMonth() + 1);
         return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
       }
 
@@ -1787,23 +1956,32 @@
         const fromStr = formatDate(MONTH_DATES[0]);
         const toStr = formatDate(MONTH_DATES[MONTH_DATES.length - 1]);
         try {
-          const resMy = await fetch(`${API_BASE}/api/my-bookings`, { headers: { Authorization: 'Bearer ' + token } });
+          const resMy = await fetch(`${API_BASE}/api/my-bookings`, {
+            headers: { Authorization: 'Bearer ' + token }
+          });
           const dataMy = await safeJson(resMy);
           AppState.userBookings = dataMy.success && Array.isArray(dataMy.bookings)
-            ? dataMy.bookings.filter(b => b.status && ['scheduled', 'rescheduled', 'pendingpayment', 'pending'].includes(b.status.toLowerCase()))
+            ? dataMy.bookings.filter(b => b.status && ['scheduled', 'rescheduled'].includes(b.status.toLowerCase()))
             : [];
           AppState.userBookings.forEach(b => {
             if (b.start) b.start = new Date(b.start);
-            else if (b.dateStr && b.timeStr) b.start = new Date(`${b.dateStr}T${b.timeStr}:00Z`);
+            else if (b.dateStr && b.timeStr) {
+              b.start = new Date(`${b.dateStr}T${b.timeStr}:00Z`);
+            }
           });
           const resGlobal = await fetch(`${API_BASE}/api/schedule?from=${fromStr}&to=${toStr}`);
           const dataGlobal = await safeJson(resGlobal);
           AppState.globalBookings = dataGlobal.success && Array.isArray(dataGlobal.items)
             ? dataGlobal.items.filter(i => i.type === 'lesson').map(i => ({ ...i, start: new Date(i.start) }))
             : [];
+          
+          // Update deferred counter display
           await updateDeferredDisplay();
         } catch (e) {
-          AppState.userBookings = []; AppState.globalBookings = []; showToast('Failed to load schedule', 'bad');
+          console.error('fetchScheduleData error', e);
+          AppState.userBookings = [];
+          AppState.globalBookings = [];
+          showToast('Failed to load schedule', 'bad');
         }
         renderSchedule();
       }
@@ -1812,7 +1990,8 @@
         const currentMonthKey = getCurrentMonthKey();
         return AppState.userBookings.filter(b => {
           if (!b.start) return false;
-          return getCurrentMonthKey(b.start) === currentMonthKey;
+          const monthKey = getCurrentMonthKey(b.start);
+          return monthKey === currentMonthKey;
         });
       }
 
@@ -1820,52 +1999,84 @@
         const grid = $('#scheduleGrid');
         if (!grid) return;
         grid.innerHTML = '';
-        if (AppState.scheduleTab === 'my') { renderMyTab(grid); $('#scheduleMonthDisplay').style.display = 'block'; } 
-        else { renderFixedTab(grid); $('#scheduleMonthDisplay').style.display = 'none'; }
-        
-        $('#scheduleLessonCount').innerText = getCurrentMonthBookings().length;
+        if (AppState.scheduleTab === 'my') {
+          renderMyTab(grid);
+          $('#scheduleMonthDisplay').style.display = 'block';
+        } else {
+          renderFixedTab(grid);
+          $('#scheduleMonthDisplay').style.display = 'none';
+        }
+        const currentMonthBookings = getCurrentMonthBookings();
+        $('#scheduleLessonCount').innerText = currentMonthBookings.length;
 
         const cancelBtn = $('#cancelMoveBtn');
         if (cancelBtn) {
           if (AppState.scheduleMoving) {
             cancelBtn.style.display = 'flex';
-            cancelBtn.onclick = () => { AppState.scheduleMoving = false; AppState.scheduleSelectedId = null; renderSchedule(); };
-          } else { cancelBtn.style.display = 'none'; }
+            cancelBtn.onclick = () => {
+              AppState.scheduleMoving = false;
+              AppState.scheduleSelectedId = null;
+              renderSchedule();
+            };
+          } else {
+            cancelBtn.style.display = 'none';
+          }
         }
-        grid.setAttribute('role', 'grid'); grid.setAttribute('aria-label', 'Monthly schedule');
+        grid.setAttribute('role', 'grid');
+        grid.setAttribute('aria-label', 'Monthly schedule');
       }
 
+      // FIX #3: Correct keyboard navigation indexing
       function handleGridKeydown(e, cell, rowIdx, colIdx) {
         const grid = $('#scheduleGrid');
         const cells = Array.from(grid.querySelectorAll('[role="gridcell"]'));
         const totalRows = SLOTS.length;
         const totalCols = MONTH_DATES.length;
-        let newRow = rowIdx; let newCol = colIdx;
+        let newRow = rowIdx;
+        let newCol = colIdx;
         switch (e.key) {
-          case 'ArrowUp': newRow = Math.max(0, rowIdx - 1); break;
-          case 'ArrowDown': newRow = Math.min(totalRows - 1, rowIdx + 1); break;
-          case 'ArrowLeft': newCol = Math.max(0, colIdx - 1); break;
-          case 'ArrowRight': newCol = Math.min(totalCols - 1, colIdx + 1); break;
-          case 'Enter': case ' ': e.preventDefault(); if (cell.onclick) cell.onclick(e); return;
-          default: return;
+          case 'ArrowUp':
+            newRow = Math.max(0, rowIdx - 1);
+            break;
+          case 'ArrowDown':
+            newRow = Math.min(totalRows - 1, rowIdx + 1);
+            break;
+          case 'ArrowLeft':
+            newCol = Math.max(0, colIdx - 1);
+            break;
+          case 'ArrowRight':
+            newCol = Math.min(totalCols - 1, colIdx + 1);
+            break;
+          case 'Enter':
+          case ' ':
+            e.preventDefault();
+            if (cell.onclick) cell.onclick(e);
+            return;
+          default:
+            return;
         }
         const newIndex = newRow * totalCols + newCol;
-        if (cells[newIndex]) cells[newIndex].focus();
+        if (cells[newIndex]) {
+          cells[newIndex].focus();
+        }
       }
 
-      // --- ИЗМЕНЕНИЕ 2: Отрисовка расписания (модалка для Pending, выделение для Free) ---
       function renderMyTab(container) {
         container.className = 'schedule-timetable';
         container.style.gridTemplateColumns = `70px repeat(${MONTH_DATES.length}, 70px)`;
         container.innerHTML = '';
         const frag = document.createDocumentFragment();
-        
+        // Header row
         let hcTime = document.createElement('div');
         hcTime.className = 'schedule-cell schedule-header-cell schedule-time-col';
-        hcTime.setAttribute('role', 'columnheader'); hcTime.textContent = 'TIME'; frag.appendChild(hcTime);
+        hcTime.setAttribute('role', 'columnheader');
+        hcTime.setAttribute('aria-label', 'Time');
+        hcTime.textContent = 'TIME';
+        frag.appendChild(hcTime);
         MONTH_DATES.forEach((d, colIdx) => {
           let hc = document.createElement('div');
           hc.className = 'schedule-cell schedule-header-cell';
+          hc.setAttribute('role', 'columnheader');
           let dow = DAYS_SHORT[getWeekdayIndex(d)];
           hc.innerHTML = `<span style="font-weight:700;">${dow}</span><span style="font-size:0.6rem;">${d.getDate()}</span>`;
           frag.appendChild(hc);
@@ -1873,13 +2084,18 @@
 
         const lessonMap = new Map();
         AppState.userBookings.forEach(b => {
-          if (b.start && !isNaN(b.start)) lessonMap.set(b.start.getTime(), b);
+          if (b.start && !isNaN(b.start)) {
+            lessonMap.set(b.start.getTime(), b);
+          }
         });
 
         SLOTS.forEach((slot, rowIdx) => {
+          let slotTime = slot;
           let timeCell = document.createElement('div');
           timeCell.className = 'schedule-cell schedule-time-col';
-          const firstDayLocal = utcSlotToLocalDate(MONTH_DATES[0], slot);
+          timeCell.setAttribute('role', 'rowheader');
+          const firstDay = MONTH_DATES[0];
+          const firstDayLocal = utcSlotToLocalDate(firstDay, slotTime);
           timeCell.textContent = formatTimeRange(firstDayLocal);
           frag.appendChild(timeCell);
 
@@ -1889,19 +2105,24 @@
             const cellUtcTime = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), ...slot.split(':').map(Number));
             let lesson = lessonMap.get(cellUtcTime);
             let otherLesson = null;
-            if (!lesson) otherLesson = AppState.globalBookings.find(gb => gb.start && gb.start.getTime() === cellUtcTime);
+            if (!lesson) {
+              otherLesson = AppState.globalBookings.find(gb => gb.start && gb.start.getTime() === cellUtcTime);
+            }
 
             let div = document.createElement('div');
-            div.className = 'schedule-cell'; div.setAttribute('role', 'gridcell'); div.setAttribute('tabindex', '-1');
+            div.className = 'schedule-cell';
+            div.setAttribute('role', 'gridcell');
+            div.setAttribute('tabindex', '-1');
+            div.dataset.row = rowIdx;
+            div.dataset.col = col;
 
             const now = Date.now();
             const hoursUntil = (cellUtcTime - now) / 3600000;
+
             const teacherLocalTime = utcToTeacherLocal(slot);
             const fixed = fixedData[teacherLocalTime]?.[wd];
 
-            const isPending = lesson && (lesson.status === 'pendingpayment' || lesson.status === 'pending');
-
-            if (lesson) {
+if (lesson) {
               if (isPending) {
                 div.classList.add('slot-pending');
                 div.innerHTML = `<i class="fas fa-hourglass-half"></i> ЖДЕТ`;
@@ -1913,7 +2134,8 @@
                 if (hoursUntil > -2) div.onclick = () => openScheduleModal(lesson);
               }
             } else if (otherLesson) {
-              div.classList.add('slot-off'); div.style.color = '#475569'; div.style.fontWeight = '700'; div.style.background = '#e2e8f0';
+              div.classList.add('slot-off');
+              div.style.color = '#475569'; div.style.fontWeight = '700'; div.style.background = '#e2e8f0';
               div.innerHTML = `<i class="fas fa-lock" style="font-size:0.55rem; color:#94a3b8;"></i> Booked`;
             } else if (fixed) {
               if (fixed === 'OFF') { div.classList.add('slot-off'); div.textContent = 'OFF'; }
@@ -1941,6 +2163,7 @@
 
                 div.onclick = async () => {
                   if (window.currentUserRole === 'teacher') {
+                    // Логика препода остается как была
                     if (confirm('Изменить статус этого слота (Открыть/Закрыть)?')) {
                       try {
                         const sId = slot._id || slot.id || (slot.slot && slot.slot._id);
@@ -1952,7 +2175,7 @@
                       } catch (e) { showToast('Ошибка соединения', 'bad'); }
                     }
                   } else {
-                    // STUDENT MULTI-SELECT
+                    // НОВАЯ Логика студента (Мульти-выбор)
                     const idx = AppState.multiBooking.findIndex(s => s.id === slotId);
                     if (idx > -1) {
                       AppState.multiBooking.splice(idx, 1);
@@ -1970,6 +2193,7 @@
                 };
               }
             }
+
             div.addEventListener('keydown', (e) => handleGridKeydown(e, div, rowIdx, col));
             frag.appendChild(div);
           }
@@ -1987,24 +2211,40 @@
         const frag = document.createDocumentFragment();
         let hcTime = document.createElement('div');
         hcTime.className = 'schedule-cell schedule-header-cell schedule-time-col';
-        hcTime.textContent = 'TIME'; frag.appendChild(hcTime);
+        hcTime.setAttribute('role', 'columnheader');
+        hcTime.textContent = 'TIME';
+        frag.appendChild(hcTime);
         DAYS_SHORT.forEach(d => {
-          let hc = document.createElement('div'); hc.className = 'schedule-cell schedule-header-cell'; hc.innerHTML = `<b>${d}</b>`; frag.appendChild(hc);
+          let hc = document.createElement('div');
+          hc.className = 'schedule-cell schedule-header-cell';
+          hc.setAttribute('role', 'columnheader');
+          hc.innerHTML = `<b>${d}</b>`;
+          frag.appendChild(hc);
         });
         const firstDay = MONTH_DATES[0];
-        SLOTS.forEach((slot) => {
-          let timeCell = document.createElement('div'); timeCell.className = 'schedule-cell schedule-time-col';
-          timeCell.textContent = formatTimeRange(utcSlotToLocalDate(firstDay, slot));
+        SLOTS.forEach((slot, rowIdx) => {
+          let slotTime = slot;
+          let timeCell = document.createElement('div');
+          timeCell.className = 'schedule-cell schedule-time-col';
+          timeCell.setAttribute('role', 'rowheader');
+          const firstDayLocal = utcSlotToLocalDate(firstDay, slotTime);
+          timeCell.textContent = formatTimeRange(firstDayLocal);
           frag.appendChild(timeCell);
           for (let wd=0; wd<7; wd++) {
-            let fix = fixedData[utcToTeacherLocal(slot)]?.[wd];
-            let div = document.createElement('div'); div.className = 'schedule-cell'; div.setAttribute('tabindex', '-1');
+            const teacherLocalTime = utcToTeacherLocal(slot);
+            let fix = fixedData[teacherLocalTime]?.[wd];
+            let div = document.createElement('div');
+            div.className = 'schedule-cell';
+            div.setAttribute('role', 'gridcell');
+            div.setAttribute('tabindex', '-1');
             if (fix === 'OFF') { div.classList.add('slot-off'); div.textContent = 'OFF'; }
             else if (fix) { div.classList.add('slot-fixed'); div.textContent = fix; }
             frag.appendChild(div);
           }
         });
         container.appendChild(frag);
+        const firstCell = container.querySelector('[role="gridcell"]');
+        if (firstCell) firstCell.setAttribute('tabindex', '0');
       }
 
       function openScheduleModal(booking) {
@@ -2017,32 +2257,77 @@
         AppState.scheduleSelectedId = booking._id;
         const bookingDate = booking.start ? new Date(booking.start) : null;
         if (bookingDate && !isNaN(bookingDate)) {
-          infoDiv.textContent = `${bookingDate.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })} · ${bookingDate.toLocaleDateString(undefined, { weekday:'short', year:'numeric', month:'short', day:'numeric' })}`;
+          const localDateStr = bookingDate.toLocaleDateString(undefined, { weekday:'short', year:'numeric', month:'short', day:'numeric' });
+          const localTimeStr = bookingDate.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
+          infoDiv.textContent = `${localTimeStr} · ${localDateStr}`;
         } else {
           infoDiv.textContent = `${booking.timeStr} · ${booking.dateStr}`;
         }
         const now = Date.now();
         const lessonTime = booking.start ? booking.start.getTime() : (new Date(`${booking.dateStr}T${booking.timeStr}:00Z`).getTime());
-        const locked = (lessonTime - now) / (1000 * 60 * 60) < 8;
+        const diffHours = (lessonTime - now) / (1000 * 60 * 60);
+        const locked = diffHours < 8;
         const past = lessonTime < now;
         lockWarn.style.display = locked ? 'block' : 'none';
 
+        // Show/hide buttons based on rules
         if (locked) {
-          btnReschedule.style.display = 'none'; btnMove.style.display = 'none'; btnCancel.style.display = 'flex';
+          // Only cancel allowed
+          btnReschedule.style.display = 'none';
+          btnMove.style.display = 'none';
+          btnCancel.style.display = 'flex';
         } else {
-          btnReschedule.style.display = 'flex'; btnMove.style.display = 'flex'; btnCancel.style.display = 'none';
+          // Reschedule and Move to next month allowed (Cancel not shown)
+          btnReschedule.style.display = 'flex';
+          btnMove.style.display = 'flex';
+          btnCancel.style.display = 'none';
+
+          // Check move limit by fetching deferred count for next month
           fetchDeferredCount(getNextMonthKey()).then(count => {
-            if (count >= 2) { btnMove.disabled = true; btnMove.style.opacity = '0.5'; } 
-            else { btnMove.disabled = false; btnMove.style.opacity = '1'; }
+            if (count >= 2) {
+              btnMove.disabled = true;
+              btnMove.style.opacity = '0.5';
+              btnMove.title = 'Maximum 2 moves per month reached';
+            } else {
+              btnMove.disabled = false;
+              btnMove.style.opacity = '1';
+              btnMove.title = '';
+            }
           });
         }
-        btnReschedule.onclick = locked ? null : () => { closeScheduleModal(); AppState.scheduleMoving = true; renderSchedule(); };
-        btnMove.onclick = locked ? null : async () => { closeScheduleModal(); if (confirm(`Move this lesson to next month?`)) { await moveToNextMonth(booking._id); } };
-        btnCancel.onclick = past ? null : async () => { if (confirm('Cancel this lesson?')) { closeScheduleModal(); try { await cancelBooking(booking._id); await fetchScheduleData(); } catch (e) { showToast('Cancel failed', 'bad'); } } };
+
+        btnReschedule.onclick = locked ? null : () => {
+          closeScheduleModal();
+          AppState.scheduleMoving = true;
+          renderSchedule();
+        };
+
+        btnMove.onclick = locked ? null : async () => {
+          closeScheduleModal();
+          const confirmMsg = `Move this lesson to next month? (You have ${2 - (await fetchDeferredCount(getNextMonthKey()))} moves left)`;
+          if (confirm(confirmMsg)) {
+            await moveToNextMonth(booking._id);
+          }
+        };
+
+        btnCancel.onclick = past ? null : async () => {
+          if (confirm('Cancel this lesson?')) {
+            closeScheduleModal();
+            try {
+              await cancelBooking(booking._id);
+              await fetchScheduleData();
+            } catch (e) {
+              showToast('Cancel failed', 'bad');
+            }
+          }
+        };
+
         modal.style.display = 'flex';
       }
 
-      window.closeScheduleModal = function() { $('#scheduleLessonModal').style.display = 'none'; };
+      window.closeScheduleModal = function() {
+        $('#scheduleLessonModal').style.display = 'none';
+      };
 
       async function finishMove(newDate, newTime) {
         if (!AppState.scheduleSelectedId) { AppState.scheduleMoving = false; renderSchedule(); return; }
@@ -2051,30 +2336,56 @@
         const [y, m, d] = newDate.split('-').map(Number);
         const targetDate = new Date(y, m-1, d);
         const localTargetDate = utcSlotToLocalDate(targetDate, newTime);
+        const now = Date.now();
         const targetUtcTime = Date.UTC(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate(), ...newTime.split(':').map(Number));
-        if ((targetUtcTime - Date.now()) / 3600000 < 8) { showToast('Cannot move to a slot that starts in less than 8 hours.', 'warn'); AppState.scheduleMoving = false; renderSchedule(); return; }
-        if (AppState.userBookings.find(l => l._id !== lesson._id && l.start && l.start.getTime() === targetUtcTime)) { showToast('Slot already taken.', 'warn'); AppState.scheduleMoving = false; renderSchedule(); return; }
-        if (AppState.globalBookings.find(gb => gb.start && gb.start.getTime() === targetUtcTime)) { showToast('Slot already taken by another student.', 'warn'); AppState.scheduleMoving = false; renderSchedule(); return; }
-        if (fixedData[utcToTeacherLocal(newTime)]?.[getWeekdayIndex(targetDate)]) { showToast('Cannot move to a fixed slot.', 'warn'); AppState.scheduleMoving = false; renderSchedule(); return; }
+        const hoursUntil = (targetUtcTime - now) / 3600000;
+        if (hoursUntil < 8) {
+          showToast('Cannot move to a slot that starts in less than 8 hours.', 'warn');
+          AppState.scheduleMoving = false;
+          renderSchedule();
+          return;
+        }
+        const conflict = AppState.userBookings.find(l => l._id !== lesson._id && 
+          l.start && l.start.getTime() === targetUtcTime);
+        if (conflict) { showToast('Slot already taken by another lesson.', 'warn'); AppState.scheduleMoving = false; renderSchedule(); return; }
+        const globalConflict = AppState.globalBookings.find(gb => gb.start && gb.start.getTime() === targetUtcTime);
+        if (globalConflict) { showToast('Slot already taken by another student.', 'warn'); AppState.scheduleMoving = false; renderSchedule(); return; }
+        const wd = getWeekdayIndex(targetDate);
+        const teacherLocalTime = utcToTeacherLocal(newTime);
+        const fixed = fixedData[teacherLocalTime]?.[wd];
+        if (fixed) { showToast('Cannot move to a fixed slot.', 'warn'); AppState.scheduleMoving = false; renderSchedule(); return; }
         try {
           await rescheduleBooking(lesson._id, localTargetDate, localTargetDate, lesson.level);
           await fetchScheduleData();
-          AppState.scheduleMoving = false; AppState.scheduleSelectedId = null;
-        } catch (e) { showToast('Reschedule failed', 'bad'); AppState.scheduleMoving = false; renderSchedule(); }
+          AppState.scheduleMoving = false;
+          AppState.scheduleSelectedId = null;
+        } catch (e) {
+          showToast('Reschedule failed', 'bad');
+          AppState.scheduleMoving = false;
+          renderSchedule();
+        }
       }
 
       function initScheduleView() {
         $('#userTimezone').innerText = Intl.DateTimeFormat().resolvedOptions().timeZone || 'local';
         const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-        if ($('#scheduleMonthDisplay')) $('#scheduleMonthDisplay').innerText = `${monthNames[currentMonth]} ${currentYear}`;
+        const monthDisplay = $('#scheduleMonthDisplay');
+        if (monthDisplay) {
+          monthDisplay.innerText = `${monthNames[currentMonth]} ${currentYear}`;
+        }
+
         $('#scheduleTabMy').addEventListener('click', () => {
-          AppState.scheduleTab = 'my'; AppState.scheduleMoving = false; AppState.multiBooking = []; updateMultiBookBar();
-          $('#scheduleTabMy').classList.add('active'); $('#scheduleTabFix').classList.remove('active');
+          AppState.scheduleTab = 'my';
+          AppState.scheduleMoving = false;
+          $('#scheduleTabMy').classList.add('active');
+          $('#scheduleTabFix').classList.remove('active');
           renderSchedule();
         });
         $('#scheduleTabFix').addEventListener('click', () => {
-          AppState.scheduleTab = 'fix'; AppState.scheduleMoving = false; AppState.multiBooking = []; updateMultiBookBar();
-          $('#scheduleTabFix').classList.add('active'); $('#scheduleTabMy').classList.remove('active');
+          AppState.scheduleTab = 'fix';
+          AppState.scheduleMoving = false;
+          $('#scheduleTabFix').classList.add('active');
+          $('#scheduleTabMy').classList.remove('active');
           renderSchedule();
         });
         fetchScheduleData();
@@ -2082,21 +2393,42 @@
 
       // ========== VIEW NAVIGATION ==========
       function showView(name){
-        ['dashboard','courses','schedule','messages','progress','settings','teacher-dashboard'].forEach(v=>{
+        ['dashboard','courses','schedule','messages','progress','settings'].forEach(v=>{
           const el = $('#view-'+v);
           if(!el) return;
           el.style.display = (v===name ? (v==='settings' ? 'block':'grid') : 'none');
         });
-        $$('.bottom-nav .nav-item').forEach(btn => { btn.classList.toggle('active', btn.dataset.nav === name); });
-        if(name === 'schedule'){ if (!window.scheduleInited) { initScheduleView(); window.scheduleInited = true; } else { fetchScheduleData(); } }
-        if ($('#mainHeader')) { if (name === 'schedule') { $('#mainHeader').classList.add('schedule-hidden'); } else { $('#mainHeader').classList.remove('schedule-hidden'); } }
-        if (name === 'dashboard') { ensureTrial(); }
+        $$('.bottom-nav .nav-item').forEach(btn => {
+          const nav = btn.dataset.nav;
+          btn.classList.toggle('active', nav === name);
+        });
+        if(name === 'schedule'){
+          if (!window.scheduleInited) {
+            initScheduleView();
+            window.scheduleInited = true;
+          } else {
+            fetchScheduleData();
+          }
+        }
+        const header = $('#mainHeader');
+        if (header) {
+          if (name === 'schedule') {
+            header.classList.add('schedule-hidden');
+          } else {
+            header.classList.remove('schedule-hidden');
+          }
+        }
+        if (name === 'dashboard') {
+          ensureTrial();
+        }
       }
 
       function showLogin(show){
         $('#loginOverlay').classList.toggle('active', !!show);
         $('.container').style.display = show ? 'none' : 'block';
-        if (show) window.scheduleInited = false;
+        if (show) {
+          window.scheduleInited = false;
+        }
       }
 
       async function renderApp(){
@@ -2106,12 +2438,17 @@
         await loadProfile(token);
         const cached = getCachedBooking();
         if(cached && (cached.dateStr || cached.timeStr || cached.country || cached.timeZone || cached.childAge!==undefined)){
-          AppState.latestBooking = cached; renderBookingCardFrom(AppState.latestBooking); updateSidebar();
+          AppState.latestBooking = cached;
+          renderBookingCardFrom(AppState.latestBooking);
+          updateSidebar();
         }else{
-          showTrialSkeleton(true); updateSidebar();
+          showTrialSkeleton(true);
+          updateSidebar();
         }
         loadBookings(token);
-        $('#statCourses').textContent = '0'; $('#statProgress').textContent = '0%'; $('#statMessages').textContent = '0';
+        $('#statCourses').textContent = '0';
+        $('#statProgress').textContent = '0%';
+        $('#statMessages').textContent = '0';
         showView('dashboard');
         $('#appLoader').classList.add('hidden');
       }
@@ -2119,43 +2456,75 @@
       // Event listeners
       window.addEventListener('DOMContentLoaded', ()=>{
         $$('.bottom-nav .nav-item').forEach(btn => {
-          btn.addEventListener('click', (e) => { e.preventDefault(); showView(btn.dataset.nav); });
+          btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            const view = btn.dataset.nav;
+            showView(view);
+          });
         });
 
-        $('#profileLogoutBtn')?.addEventListener('click', (e)=>{ e.preventDefault(); clearToken(); cacheBooking({}); showLogin(true); });
+        $('#profileLogoutBtn')?.addEventListener('click', (e)=>{
+          e.preventDefault();
+          clearToken();
+          cacheBooking({});
+          showLogin(true);
+        });
 
         $('#loginForm').addEventListener('submit', async (e)=>{
           e.preventDefault();
-          const email = $('#loginEmail').value.trim(); const password = $('#loginPassword').value.trim();
+          const email = $('#loginEmail').value.trim();
+          const password = $('#loginPassword').value.trim();
           if(!email || !password){ showToast('Enter email and password','warn'); return; }
           try{
-            const res = await fetch(`${API_BASE}/api/login`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ email, password }) });
+            const res = await fetch(`${API_BASE}/api/login`, {
+              method:'POST', headers:{'Content-Type':'application/json'},
+              body: JSON.stringify({ email, password })
+            });
             const data = await safeJson(res);
-            if(res.ok && (data?.token)){ setToken(data.token); showToast('Welcome back!','good'); checkUserRoleAndSetupUI(); }
-            else{ showToast(data?.message || 'Login failed','bad'); }
+            if(res.ok && (data?.token)){
+              setToken(data.token);
+              showToast('Welcome back!','good');
+              renderApp();
+            }else{
+              showToast(data?.message || 'Login failed','bad');
+            }
           }catch(e){ showToast('Network error','bad'); }
         });
 
+        const settingsFill = ()=>{
+          $('#inpFirstName').value = (AppState.profile?.firstName)||'';
+          $('#inpLastName').value = (AppState.profile?.lastName)||'';
+          $('#inpEmail').value = (AppState.profile?.email)||'';
+        };
+
         $$('[data-nav="settings"]').forEach(btn => {
-          btn.addEventListener('click', () => { $('#inpFirstName').value = (AppState.profile?.firstName)||''; $('#inpLastName').value = (AppState.profile?.lastName)||''; $('#inpEmail').value = (AppState.profile?.email)||''; });
+          btn.addEventListener('click', settingsFill);
         });
 
         $('#settingsForm').addEventListener('submit', async (e)=>{
           e.preventDefault();
-          const fn = $('#inpFirstName').value.trim(); const ln = $('#inpLastName').value.trim(); const em = $('#inpEmail').value.trim();
+          const fn = $('#inpFirstName').value.trim();
+          const ln = $('#inpLastName').value.trim();
+          const em = $('#inpEmail').value.trim();
           const updates = { firstName: fn, lastName: ln, email: em };
           const success = await updateProfileOnServer(updates);
           if (success) {
             AppState.profile = {...AppState.profile, ...updates};
             const fullName = `${fn} ${ln}`.trim() || '—';
-            if ($('#userFullName')) {
-              $('#userFullName').innerHTML = '';
-              $('#userFullName').appendChild(document.createTextNode(fullName));
-              $('#userFullName').appendChild(document.createTextNode(' '));
-              const dot = document.createElement('span'); dot.className = 'online-dot'; $('#userFullName').appendChild(dot);
+            const userFullNameEl = $('#userFullName');
+            if (userFullNameEl) {
+              userFullNameEl.innerHTML = '';
+              userFullNameEl.appendChild(document.createTextNode(fullName));
+              userFullNameEl.appendChild(document.createTextNode(' '));
+              const dot = document.createElement('span');
+              dot.className = 'online-dot';
+              userFullNameEl.appendChild(dot);
             }
-            const extras = getExtras(); extras.childName = fullName || extras.childName; setExtras(extras);
-            showToast('Settings saved','good'); await loadBookings(getToken());
+            const extras = getExtras();
+            extras.childName = fullName || extras.childName;
+            setExtras(extras);
+            showToast('Settings saved','good');
+            await loadBookings(getToken());
           }
         });
 
@@ -2168,30 +2537,50 @@
             const state = getBookingState(AppState.latestBooking);
             openBookingModal({}, async ({dateObj, timeObj})=>{
               try {
-                if(state === 'upcoming' && AppState.latestBooking?._id){ await rescheduleBooking(AppState.latestBooking._id, dateObj, timeObj, AppState.latestBooking.level||'Beginner'); }
-                else{ await createTrialBooking(dateObj, timeObj, 'Beginner'); }
-              } catch (e) { showToast('Booking failed', 'bad'); }
+                if(state === 'upcoming' && AppState.latestBooking?._id){
+                  await rescheduleBooking(AppState.latestBooking._id, dateObj, timeObj, AppState.latestBooking.level||'Beginner');
+                }else{
+                  await createTrialBooking(dateObj, timeObj, 'Beginner');
+                }
+              } catch (e) {
+                showToast('Booking failed', 'bad');
+              }
             });
           }
         });
 
-        window.currentUserRole = 'student';
+
+        // === ЛОГИКА ДЛЯ ПРЕПОДАВАТЕЛЯ ===
+        window.currentUserRole = 'student'; // по умолчанию все студенты
+
         async function checkUserRoleAndSetupUI() {
           try {
             const res = await fetch(`${API_BASE}/api/me`, { headers: getAuthHeaders() });
             const data = await res.json();
+
+            console.log("Данные от сервера:", data); // ДОБАВЬТЕ ЭТО
+
             if (data.success && data.user) {
               window.currentUserRole = data.user.role;
+              
               if (window.currentUserRole === 'teacher') {
-                if ($('#navCourses')) $('#navCourses').style.display = 'none';
-                if ($('#navHome')) $('#navHome').setAttribute('data-nav', 'teacher-dashboard');
+                // 1. Прячем вкладку Courses
+                const navCourses = document.getElementById('navCourses');
+                if (navCourses) navCourses.style.display = 'none';
+                
+                // 2. Меняем кнопку Home
+                const navHome = document.getElementById('navHome');
+                if (navHome) navHome.setAttribute('data-nav', 'teacher-dashboard');
+                
+                // 3. Открываем кабинет препода
                 showView('teacher-dashboard');
                 loadTeacherDashboard();
-              } else {
-                renderApp();
               }
+              // Если это студент, ничего не меняем, он остается на своем дашборде
             }
-          } catch (e) { console.error('Ошибка проверки роли', e); }
+          } catch (e) {
+            console.error('Ошибка проверки роли', e);
+          }
         }
 
         async function loadTeacherDashboard() {
@@ -2199,12 +2588,14 @@
             const statsRes = await fetch(`${API_BASE}/api/teacher/dashboard`, { headers: getAuthHeaders() });
             const stats = await statsRes.json();
             if (stats.success) {
-              $('#teacher-students-count').textContent = stats.studentsCount;
-              $('#teacher-lessons-count').textContent = stats.lessonsThisMonth;
+              document.getElementById('teacher-students-count').textContent = stats.studentsCount;
+              document.getElementById('teacher-lessons-count').textContent = stats.lessonsThisMonth;
             }
+
             const studentsRes = await fetch(`${API_BASE}/api/teacher/students`, { headers: getAuthHeaders() });
             const students = await studentsRes.json();
-            const listEl = $('#teacher-students-list');
+            
+            const listEl = document.getElementById('teacher-students-list');
             if (students.success && students.students.length > 0) {
               listEl.innerHTML = students.students.map(s => `
                 <div style="padding: 12px 0; border-bottom: 1px solid #f1f5f9; display: flex; align-items: center;">
@@ -2217,15 +2608,21 @@
                   </div>
                 </div>
               `).join('');
-            } else { listEl.innerHTML = '<div style="color: #6b7280; font-size: 14px; text-align: center; padding: 10px;">У вас пока нет учеников</div>'; }
-          } catch (e) {}
+            } else {
+              listEl.innerHTML = '<div style="color: #6b7280; font-size: 14px; text-align: center; padding: 10px;">У вас пока нет учеников</div>';
+            }
+          } catch (e) {
+            console.error('Ошибка загрузки дашборда', e);
+          }
         }
+        // === КОНЕЦ ЛОГИКИ ПРЕПОДАВАТЕЛЯ ===
 
-        if (getToken()) {
-          checkUserRoleAndSetupUI();
-        } else {
-          renderApp();
-        }
+        // Запускаем приложение как обычно
+        renderApp();
+        
+        // СРАЗУ ПОСЛЕ ЗАПУСКА проверяем роль и меняем интерфейс, если это препод!
+        checkUserRoleAndSetupUI();
+        
       });
     })();
   </script>
