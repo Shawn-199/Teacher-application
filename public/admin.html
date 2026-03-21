@@ -12,7 +12,8 @@ header{display:flex;justify-content:space-between;align-items:center;padding:12p
 .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;box-shadow:0 6px 18px rgba(0,0,0,.04)}
 .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 input,select,button{height:40px;border-radius:10px;border:1px solid var(--border);padding:0 12px;font:inherit}
-button{background:var(--primary);color:#fff;border:none;cursor:pointer}
+button{background:var(--primary);color:#fff;border:none;cursor:pointer;transition: opacity 0.2s;}
+button:disabled{opacity:0.6;cursor:not-allowed;}
 button.ghost{background:#fff;color:#0f172a;border:1px solid var(--border)}
 table{width:100%;border-collapse:collapse;margin-top:10px}
 th,td{border-bottom:1px solid var(--border);text-align:left;padding:10px}
@@ -30,6 +31,21 @@ th{font-weight:800;color:#334155}
 .status-PendingPayment{background:#fffbeb;border-color:#fde68a;color:#92400e}
 .status-Late-Cancelled{background:#fef2f2;border-color:#fca5a5;color:#b91c1c}
 .right{margin-left:auto}
+
+/* Checkbox styling */
+input[type="checkbox"] {width: 18px; height: 18px; cursor: pointer;}
+
+/* Bulk actions bar */
+.bulk-bar {
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  padding: 10px 16px;
+  margin-top: 12px;
+  display: none; /* hidden by default */
+  align-items: center;
+  gap: 12px;
+}
 
 /* Login gate */
 #loginGate{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);z-index:9999}
@@ -49,7 +65,6 @@ body.authed .wrap{display:grid}
   </div>
 </header>
 
-<!-- Login Gate -->
 <div id="loginGate">
   <div id="loginPanel">
     <div style="font-weight:600;font-size:18px;text-align:center;">Admin Login</div>
@@ -60,7 +75,6 @@ body.authed .wrap{display:grid}
   </div>
 </div>
 
-<!-- App -->
 <div class="wrap" id="appRoot">
   <section class="card">
     <div class="row">
@@ -96,11 +110,39 @@ body.authed .wrap{display:grid}
       <input id="bEmail" placeholder="email filter"/>
       <input id="bFrom" type="datetime-local" title="from"/>
       <input id="bTo" type="datetime-local" title="to"/>
-      <select id="bLimit"><option>25</option><option>50</option><option>100</option></select>
+      <select id="bLimit"><option>25</option><option>50</option><option>100</option><option>200</option></select>
       <button id="btnBookings">Load</button>
     </div>
+
+    <div class="bulk-bar" id="bulkBar">
+      <strong>Bulk Actions:</strong>
+      <span class="small" id="bulkCount">0 selected</span>
+      <select id="bulkStatus">
+        <option value="">-- Change status to --</option>
+        <option>PendingPayment</option>
+        <option>Scheduled</option>
+        <option>Completed</option>
+        <option>Late-Cancelled</option>
+        <option>Cancelled</option>
+        <option>No-Show</option>
+        <option>Rescheduled</option>
+      </select>
+      <button id="btnBulkApply">Apply</button>
+    </div>
+
     <table id="bookTbl">
-      <thead><tr><th>When</th><th>Student Email</th><th>Child / Parent</th><th>Level</th><th>Teacher</th><th>Status</th><th>Actions</th></tr></thead>
+      <thead>
+        <tr>
+          <th style="width: 40px;"><input type="checkbox" id="chkAll" title="Select All"></th>
+          <th>When</th>
+          <th>Student Email</th>
+          <th>Child / Parent</th>
+          <th>Level</th>
+          <th>Teacher</th>
+          <th>Status</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
       <tbody></tbody>
     </table>
   </section>
@@ -139,6 +181,15 @@ async function ensureAuthFromToken(){
     }
   }catch(e){ /* ignore */ }
   return false;
+}
+
+// Bulk update helpers
+function updateBulkUI() {
+  const checked = document.querySelectorAll('.bChk:checked').length;
+  const total = document.querySelectorAll('.bChk').length;
+  $('bulkCount').textContent = `${checked} selected`;
+  $('bulkBar').style.display = checked > 0 ? 'flex' : 'none';
+  $('chkAll').checked = (total > 0 && checked === total);
 }
 
 document.addEventListener('DOMContentLoaded', async ()=>{
@@ -209,7 +260,7 @@ document.addEventListener('DOMContentLoaded', async ()=>{
     }catch(e){ alert('Users error: '+e.message); }
   });
 
-  // Bookings
+  // Bookings Main Load
   $('btnBookings')?.addEventListener('click', async ()=>{
     try{
       const status = $('bStatus').value, email = $('bEmail').value.trim();
@@ -225,10 +276,16 @@ document.addEventListener('DOMContentLoaded', async ()=>{
 
       const j = await api(url.pathname + '?' + url.searchParams.toString());
       const tb = $('bookTbl').querySelector('tbody'); tb.innerHTML='';
+      
+      // Reset bulk actions state
+      $('chkAll').checked = false;
+      updateBulkUI();
+
       j.bookings.forEach(b=>{
         const tr = document.createElement('tr');
         const tag = (txt)=>`<span class="tag status-${txt.replace(' ','-')}">${txt}</span>`;
         tr.innerHTML = `
+          <td><input type="checkbox" class="bChk" value="${b._id}"></td>
           <td>
             <div>${b.dateStr||'—'} ${b.timeStr||''}</div>
             <div class="small">created: ${fmt(b.createdAt)}</div>
@@ -259,6 +316,7 @@ document.addEventListener('DOMContentLoaded', async ()=>{
         tb.appendChild(tr);
       });
 
+      // Single Save Listeners
       tb.querySelectorAll('.btnSave').forEach(btn=>{
         btn.onclick = async ()=>{
           const id = btn.dataset.id;
@@ -271,11 +329,59 @@ document.addEventListener('DOMContentLoaded', async ()=>{
           try{
             await api(`/api/admin/bookings/${id}/status`, { method:'PATCH', body: JSON.stringify(body) });
             btn.textContent='Saved'; setTimeout(()=>btn.textContent='Save', 1200);
+            // Optional: Auto-reload to see color changes
+            // $('btnBookings').click(); 
           }catch(e){ alert('Save error: '+e.message); }
         };
       });
 
     }catch(e){ alert('Bookings error: '+e.message); }
+  });
+
+  // --- Bulk Selection Listeners ---
+  $('chkAll')?.addEventListener('change', (e) => {
+    document.querySelectorAll('.bChk').forEach(chk => chk.checked = e.target.checked);
+    updateBulkUI();
+  });
+
+  $('bookTbl')?.addEventListener('change', (e) => {
+    if(e.target.classList.contains('bChk')) {
+      updateBulkUI();
+    }
+  });
+
+  // Bulk Apply Logic
+  $('btnBulkApply')?.addEventListener('click', async () => {
+    const newStatus = $('bulkStatus').value;
+    if (!newStatus) return alert('Please select a status first.');
+
+    const checkboxes = document.querySelectorAll('.bChk:checked');
+    const ids = Array.from(checkboxes).map(c => c.value);
+    
+    if(!confirm(`Are you sure you want to change the status of ${ids.length} lessons to "${newStatus}"?`)) return;
+
+    const btn = $('btnBulkApply');
+    btn.textContent = 'Updating...';
+    btn.disabled = true;
+
+    try {
+      // Parallel requests (no backend change required)
+      await Promise.all(ids.map(id => 
+        api(`/api/admin/bookings/${id}/status`, { 
+          method: 'PATCH', 
+          body: JSON.stringify({ status: newStatus }) 
+        })
+      ));
+      
+      // Reload table to show updated statuses
+      $('btnBookings').click(); 
+    } catch(e) {
+      alert('Error during bulk update: ' + e.message);
+    } finally {
+      btn.textContent = 'Apply';
+      btn.disabled = false;
+      $('bulkStatus').value = '';
+    }
   });
 
 });

@@ -174,8 +174,10 @@ try { TimeSlot = mongoose.model('TimeSlot'); } catch (e) {
     startISO: Date,
     endISO: Date,
     teacherName: { type: String, default: process.env.TEACHER_NAME || 'Teacher' },
-    // NEW: teacherId (reference to User)
     teacherId: { type: Schema.Types.ObjectId, ref: 'User', index: true },
+    // НОВЫЕ ПОЛЯ ДЛЯ FIXED GRID:
+    studentId: { type: Schema.Types.ObjectId, ref: 'User', index: true },
+    studentName: String,
     note: String,
     isActive: { type: Boolean, default: true }
   }, { timestamps: true });
@@ -513,7 +515,7 @@ app.post('/api/login', async (req, res) => {
 
 app.get('/api/me', optionalAuth, async (req, res) => {
   if (!req.user) return res.json({ success:true, user:null });
-  const user = await User.findById(req.user.uid).select('_id email firstName lastName role');
+  const user = await User.findById(req.user.uid).select('_id email firstName lastName role assignedTeacher');
   res.json({ success:true, user });
 });
 
@@ -1337,7 +1339,7 @@ app.get('/api/teacher/students', requireTeacher, async (req, res) => {
 // GET /api/teacher/schedule — teacher's bookings and slots for a date range
 app.get('/api/teacher/schedule', requireTeacher, async (req, res) => {
   const { from, to } = req.query;
-  const teacherId = req.user.id; // ИСПРАВЛЕНО: было req.teacher.id
+  const teacherId = req.user.id; 
   const start = from ? new Date(from) : new Date(new Date().setDate(1)); // start of month
   const end = to ? new Date(to) : new Date(new Date().setMonth(start.getMonth()+1, 0));
 
@@ -1349,7 +1351,6 @@ app.get('/api/teacher/schedule', requireTeacher, async (req, res) => {
     }).lean(),
     TimeSlot.find({
       teacherId,
-      isActive: true,
       $or: [
         { kind: 'oneoff', startISO: { $lte: end }, endISO: { $gte: start } },
         { kind: 'recurring', $or: [
@@ -1365,14 +1366,14 @@ app.get('/api/teacher/schedule', requireTeacher, async (req, res) => {
 
 // GET /api/teacher/slots — list teacher's own slots
 app.get('/api/teacher/slots', requireTeacher, async (req, res) => {
-  const teacherId = req.user.id; // ИСПРАВЛЕНО
+  const teacherId = req.user.id; 
   const slots = await TimeSlot.find({ teacherId }).sort({ createdAt: -1 }).limit(500);
   res.json({ success:true, slots });
 });
 
 // POST /api/teacher/slots — create a new slot
 app.post('/api/teacher/slots', requireTeacher, async (req, res) => {
-  const teacherId = req.user.id; // ИСПРАВЛЕНО
+  const teacherId = req.user.id; 
   const teacher = await User.findById(teacherId);
   if (!teacher) return res.status(404).json({ success:false, message:'Teacher not found' });
 
@@ -1388,7 +1389,7 @@ app.post('/api/teacher/slots', requireTeacher, async (req, res) => {
 // PATCH /api/teacher/slots/:id/toggle — toggle isActive
 app.patch('/api/teacher/slots/:id/toggle', requireTeacher, async (req, res) => {
   const { id } = req.params;
-  const slot = await TimeSlot.findOne({ _id: id, teacherId: req.user.id }); // ИСПРАВЛЕНО
+  const slot = await TimeSlot.findOne({ _id: id, teacherId: req.user.id }); 
   if (!slot) return res.status(404).json({ success:false, message:'Slot not found or not yours' });
   slot.isActive = !slot.isActive;
   await slot.save();
@@ -1398,7 +1399,7 @@ app.patch('/api/teacher/slots/:id/toggle', requireTeacher, async (req, res) => {
 // DELETE /api/teacher/slots/:id — delete slot
 app.delete('/api/teacher/slots/:id', requireTeacher, async (req, res) => {
   const { id } = req.params;
-  const result = await TimeSlot.deleteOne({ _id: id, teacherId: req.user.id }); // ИСПРАВЛЕНО
+  const result = await TimeSlot.deleteOne({ _id: id, teacherId: req.user.id }); 
   res.json({ success: result.deletedCount > 0 });
 });
 
@@ -1413,6 +1414,17 @@ app.get('/api/schedule', optionalAuth, async (req, res) => {
       return res.status(400).json({ success:false, message:'Invalid range' });
     }
 
+    // Фильтрация расписания по преподавателю
+    let targetTeacherId = null;
+    if (req.user) {
+      const u = await User.findById(req.user.uid);
+      if (u && u.role === 'student' && u.assignedTeacher) {
+        targetTeacherId = u.assignedTeacher;
+      } else if (u && u.role === 'teacher') {
+        targetTeacherId = u._id;
+      }
+    }
+
     const items = [];
     const addItem = (type, title, start, end, extra = {}) => {
       if (!start || !end) return;
@@ -1423,11 +1435,14 @@ app.get('/api/schedule', optionalAuth, async (req, res) => {
       items.push({ type, title, start: st, end: en, ...extra });
     };
 
-    // 1) Lessons from bookings – now using the start field
-    const lessons = await Booking.find({
+    // 1) Lessons from bookings
+    const bQuery = {
       status: { $in: ['Scheduled', 'Rescheduled', 'PendingPayment'] },
       start: { $gte: from, $lte: to }
-    }).lean();
+    };
+    if (targetTeacherId) bQuery.teacherId = targetTeacherId;
+
+    const lessons = await Booking.find(bQuery).lean();
 
     for (const b of lessons) {
       if (!b.start) continue;
@@ -1447,9 +1462,8 @@ app.get('/api/schedule', optionalAuth, async (req, res) => {
       );
     }
 
-    // 2) Slots from TimeSlot (unchanged)...
-    const slots = await TimeSlot.find({
-      isActive: true,
+    // 2) Slots from TimeSlot
+    const sQuery = {
       $or: [
         { kind: 'oneoff', startISO: { $lt: to }, endISO: { $gt: from } },
         {
@@ -1460,12 +1474,18 @@ app.get('/api/schedule', optionalAuth, async (req, res) => {
           ]
         }
       ]
-    }).lean();
+    };
+    if (targetTeacherId) sQuery.teacherId = targetTeacherId;
+
+    const slots = await TimeSlot.find(sQuery).lean();
 
     // One-off slots
     for (const s of slots) {
       if (s.kind !== 'oneoff') continue;
-      addItem('slot', 'Available', s.startISO, s.endISO, { teacherName: s.teacherName, teacherId: s.teacherId });
+      addItem('slot', 'Available', s.startISO, s.endISO, { 
+        teacherName: s.teacherName, teacherId: s.teacherId,
+        isActive: s.isActive, studentId: s.studentId, studentName: s.studentName
+      });
     }
 
     // Recurring slots expanded per day
@@ -1482,7 +1502,10 @@ app.get('/api/schedule', optionalAuth, async (req, res) => {
         const [eh, em] = String(s.endTime   || '0:0').split(':').map(Number);
         const start = new Date(d); start.setHours(sh || 0, sm || 0, 0, 0);
         const end   = new Date(d); end.setHours(eh || 0, em || 0, 0, 0);
-        addItem('slot', 'Available', start, end, { teacherName: s.teacherName, teacherId: s.teacherId });
+        addItem('slot', 'Available', start, end, { 
+          teacherName: s.teacherName, teacherId: s.teacherId,
+          isActive: s.isActive, studentId: s.studentId, studentName: s.studentName 
+        });
       }
     }
 
