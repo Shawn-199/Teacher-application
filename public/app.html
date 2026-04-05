@@ -673,13 +673,14 @@
       opacity: 0.9;
     }
     .slot-fixed {
-      background: #ffd966;
-      color: #2e4a59;
+      background: #ffd966 !important;
+      color: #2e4a59 !important;
       font-weight: 700;
       border-radius: 6px;
       font-size: 0.62rem;
       padding: 4px 2px;
       margin: 2px;
+      cursor: pointer;
     }
     .slot-off {
       background: #e2ebf2;
@@ -1912,6 +1913,22 @@
         return new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), hour, minute, 0));
       }
 
+      function getNextDateForWeekday(targetWd, targetTime) {
+        const _now = new Date();
+        let result = new Date(_now);
+        const [h, m] = targetTime.split(':').map(Number);
+        result.setHours(h, m, 0, 0);
+        
+        if (result.getTime() <= _now.getTime()) {
+          result.setDate(result.getDate() + 1);
+        }
+        
+        while (getWeekdayIndex(result) !== targetWd) {
+          result.setDate(result.getDate() + 1);
+        }
+        return result;
+      }
+
       function formatTimeRange(date) {
         const start = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
         const end = new Date(date.getTime() + 25*60000);
@@ -2155,6 +2172,8 @@
 
             let offSlot = AppState.globalSlots.find(s => s.kind === 'oneoff' && !s.isActive && new Date(s.startISO||s.start).getTime() === cellUtcTime);
             if (!offSlot) offSlot = AppState.globalSlots.find(s => s.kind === 'recurring' && !s.isActive && s.dow === wd && s.startTime === tLocal);
+            
+            let fixedSlot = AppState.globalSlots.find(s => s.kind === 'recurring' && s.isActive && s.studentName && s.dow === wd && s.startTime === tLocal);
 
             let div = document.createElement('div');
             div.className = 'schedule-cell';
@@ -2164,6 +2183,7 @@
             div.dataset.col = col;
 
             const now = Date.now();
+            const isPast = cellUtcTime < now;
             const hoursUntil = (cellUtcTime - now) / 3600000;
             const isPending = lesson && (lesson.status === 'pendingpayment' || lesson.status === 'pending');
 
@@ -2172,12 +2192,25 @@
               if (globalLesson) {
                 div.classList.add('slot-my'); div.style.background = '#1b325f';
                 div.innerHTML = `<div style="line-height:1.1">${globalLesson.childName || 'Student'}</div>`;
+              } else if (fixedSlot) {
+                div.classList.add('slot-fixed');
+                div.innerHTML = `<div style="line-height:1.1">${fixedSlot.studentName}</div>`;
               } else if (offSlot) {
                 div.classList.add('slot-off'); div.textContent = 'OFF';
-                div.onclick = () => handleTeacherSlotClick(startISO, offSlot);
+                if (!isPast) {
+                    div.style.cursor = 'pointer';
+                    div.onclick = () => handleTeacherSlotClick(startISO, offSlot);
+                } else {
+                    div.style.cursor = 'default';
+                }
               } else {
-                div.classList.add('slot-free'); div.innerHTML = '+';
-                div.onclick = () => handleTeacherSlotClick(startISO, null);
+                if (isPast) {
+                    div.style.cursor = 'default';
+                    div.innerHTML = '';
+                } else {
+                    div.classList.add('slot-free'); div.innerHTML = '+';
+                    div.onclick = () => handleTeacherSlotClick(startISO, null);
+                }
               }
             } else {
               // STUDENT VIEW
@@ -2190,13 +2223,13 @@
                   div.classList.add('slot-my');
                   div.innerHTML = `<i class="fas fa-user"></i> MY`;
                   if (hoursUntil < 8) div.classList.add('slot-locked');
-                  if (hoursUntil > -2) div.onclick = () => openScheduleModal(lesson);
+                  if (hoursUntil > -2 && !isPast) div.onclick = () => openScheduleModal(lesson);
                 }
-              } else if (globalLesson || offSlot) {
+              } else if (globalLesson || offSlot || fixedSlot) {
                 div.classList.add('slot-off');
                 div.style.color = '#475569'; div.style.fontWeight = '700'; div.style.background = '#e2e8f0';
                 div.innerHTML = `<i class="fas fa-lock" style="font-size:0.55rem; color:#94a3b8;"></i> Booked`;
-              } else if (hoursUntil >= 8) {
+              } else if (!isPast) {
                 if (AppState.scheduleMoving) {
                   div.classList.add('slot-target');
                   div.innerHTML = '<i class="fas fa-arrow-right"></i> MOVE';
@@ -2233,6 +2266,9 @@
                     updateMultiBookBar();
                   };
                 }
+              } else {
+                div.style.cursor = 'default';
+                div.innerHTML = '';
               }
             }
 
@@ -2252,11 +2288,13 @@
         container.setAttribute('role', 'grid');
         container.innerHTML = '';
         const frag = document.createDocumentFragment();
+        
         let hcTime = document.createElement('div');
         hcTime.className = 'schedule-cell schedule-header-cell schedule-time-col';
         hcTime.setAttribute('role', 'columnheader');
         hcTime.textContent = 'TIME';
         frag.appendChild(hcTime);
+        
         DAYS_SHORT.forEach(d => {
           let hc = document.createElement('div');
           hc.className = 'schedule-cell schedule-header-cell';
@@ -2264,6 +2302,7 @@
           hc.innerHTML = `<b>${d}</b>`;
           frag.appendChild(hc);
         });
+
         const firstDay = MONTH_DATES[0];
         SLOTS.forEach((slot, rowIdx) => {
           let slotTime = slot;
@@ -2273,6 +2312,7 @@
           const firstDayLocal = utcSlotToLocalDate(firstDay, slotTime);
           timeCell.textContent = formatTimeRange(firstDayLocal);
           frag.appendChild(timeCell);
+
           for (let wd=0; wd<7; wd++) {
             const tLocal = utcToTeacherLocal(slot);
             let recSlot = AppState.globalSlots.find(s => s.kind === 'recurring' && s.dow === wd && s.startTime === tLocal);
@@ -2285,9 +2325,79 @@
             if (recSlot && !recSlot.isActive) {
               div.classList.add('slot-off'); div.textContent = 'OFF';
               if(isTeacher) div.onclick = () => handleTeacherFixedClick(wd, tLocal, recSlot, true);
+            } else if (recSlot && recSlot.studentName) {
+              if (isTeacher) {
+                div.classList.add('slot-fixed'); 
+                div.textContent = recSlot.studentName;
+                div.onclick = () => handleTeacherFixedClick(wd, tLocal, recSlot, false); 
+              } else {
+                const myName = AppState.profile ? `${AppState.profile.firstName||''} ${AppState.profile.lastName||''}`.trim() : '';
+                const childName = getExtras().childName || '';
+                
+                if (recSlot.studentName === myName || recSlot.studentName === childName) {
+                  div.classList.add('slot-fixed'); 
+                  div.innerHTML = `<i class="fas fa-user"></i> MY`;
+                  div.style.cursor = 'pointer';
+                  div.onclick = () => {
+                    const targetBooking = AppState.userBookings.find(b => {
+                      if (!b.start) return false;
+                      return getWeekdayIndex(b.start) === wd && b.start.getHours() === Number(tLocal.split(':')[0]) && b.start.getTime() > Date.now();
+                    });
+                    if (targetBooking) {
+                      openScheduleModal(targetBooking);
+                    } else {
+                      showToast('No upcoming lesson found for this slot.', 'warn');
+                    }
+                  };
+                } else {
+                  div.classList.add('slot-off');
+                  div.style.color = '#475569'; div.style.fontWeight = '700'; div.style.background = '#e2e8f0';
+                  div.innerHTML = `<i class="fas fa-lock" style="font-size:0.55rem; color:#94a3b8;"></i> Booked`;
+                }
+              }
             } else {
-              div.classList.add('slot-free');
-              if(isTeacher) div.onclick = () => handleTeacherFixedClick(wd, tLocal, null, false);
+              if (isTeacher) {
+                div.classList.add('slot-free');
+                div.innerHTML = '<i class="fas fa-plus" style="color:var(--primary); opacity: 0.5;"></i>';
+                // ТУТ ИСПРАВЛЕН БАГ ЗАКРЫТИЯ СЛОТА - передаем recSlot вместо null
+                div.onclick = () => handleTeacherFixedClick(wd, tLocal, recSlot, false);
+              } else {
+                // ЛОГИКА ДЛЯ СТУДЕНТОВ - могут взаимодействовать с пустыми слотами в Fixed Grid
+                const nextDate = getNextDateForWeekday(wd, tLocal);
+                const localDateStr = formatDate(nextDate);
+                const startISO = nextDate.toISOString();
+                const slotId = `${localDateStr}T${tLocal}`;
+
+                if (AppState.scheduleMoving) {
+                  div.classList.add('slot-target');
+                  div.innerHTML = '<i class="fas fa-arrow-right"></i> MOVE';
+                  div.onclick = () => finishMove(localDateStr, tLocal);
+                } else {
+                  const isSelected = AppState.multiBooking.some(s => s.id === slotId);
+                  if (isSelected) {
+                    div.classList.add('slot-selected');
+                    div.innerHTML = '<i class="fas fa-check"></i>';
+                  } else {
+                    div.classList.add('slot-free');
+                    div.innerHTML = '<i class="fas fa-plus" style="color:var(--primary);"></i>';
+                  }
+                  div.onclick = () => {
+                    const idx = AppState.multiBooking.findIndex(s => s.id === slotId);
+                    if (idx > -1) {
+                      AppState.multiBooking.splice(idx, 1);
+                      div.classList.remove('slot-selected');
+                      div.classList.add('slot-free');
+                      div.innerHTML = '<i class="fas fa-plus" style="color:var(--primary);"></i>';
+                    } else {
+                      AppState.multiBooking.push({ id: slotId, dateObj: nextDate, timeObj: nextDate, startISO });
+                      div.classList.remove('slot-free');
+                      div.classList.add('slot-selected');
+                      div.innerHTML = '<i class="fas fa-check"></i>';
+                    }
+                    updateMultiBookBar();
+                  };
+                }
+              }
             }
             frag.appendChild(div);
           }
@@ -2399,7 +2509,6 @@
         const wd = getWeekdayIndex(targetDate);
         const teacherLocalTime = utcToTeacherLocal(newTime);
         
-        // Проверяем OFF через globalSlots
         const isOff = AppState.globalSlots.find(s => 
           (s.kind === 'recurring' && s.dow === wd && s.startTime === teacherLocalTime && !s.isActive) ||
           (s.kind === 'oneoff' && new Date(s.startISO||s.start).getTime() === targetUtcTime && !s.isActive)
@@ -2428,8 +2537,6 @@
 
         $('#scheduleTabMy').addEventListener('click', () => {
           AppState.scheduleTab = 'my';
-          AppState.scheduleMoving = false;
-          AppState.multiBooking = []; 
           updateMultiBookBar();
           $('#scheduleTabMy').classList.add('active');
           $('#scheduleTabFix').classList.remove('active');
@@ -2438,8 +2545,6 @@
         
         $('#scheduleTabFix').addEventListener('click', () => {
           AppState.scheduleTab = 'fix';
-          AppState.scheduleMoving = false;
-          AppState.multiBooking = []; 
           updateMultiBookBar();
           $('#scheduleTabFix').classList.add('active');
           $('#scheduleTabMy').classList.remove('active');
