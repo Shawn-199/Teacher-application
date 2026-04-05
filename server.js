@@ -1336,6 +1336,34 @@ app.get('/api/teacher/students', requireTeacher, async (req, res) => {
   }
 });
 
+// ==== NEW: PATCH /api/teacher/bookings/:id/status ====
+// Позволяет преподавателю отмечать проведенные уроки и пропуски
+app.patch('/api/teacher/bookings/:id/status', requireTeacher, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    
+    // Разрешаем преподавателю ставить только определенные статусы
+    if (!['Completed', 'Conducted', 'No-Show'].includes(status)) {
+       return res.status(400).json({ success: false, message: 'Invalid status update for teacher' });
+    }
+
+    // Ищем бронирование, которое ПРИНАДЛЕЖИТ этому преподавателю
+    const b = await Booking.findOne({ _id: id, teacherId: req.user.id });
+    if (!b) {
+      return res.status(404).json({ success: false, message: 'Booking not found or not assigned to you' });
+    }
+
+    b.status = status;
+    await b.save();
+
+    res.json({ success: true, booking: b });
+  } catch (e) {
+    console.error('Teacher update status error:', e);
+    res.status(500).json({ success: false, message: 'Failed to update lesson status' });
+  }
+});
+
 // GET /api/teacher/schedule — teacher's bookings and slots for a date range
 app.get('/api/teacher/schedule', requireTeacher, async (req, res) => {
   const { from, to } = req.query;
