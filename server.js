@@ -871,7 +871,7 @@ app.post('/api/book', auth, async (req, res) => {
   }
 });
 
-// ==== BULK BOOKING ENDPOINT (ОБНОВЛЕНО: Поддержка Fixed Grid) ====
+// ==== BULK BOOKING ENDPOINT (ИСПРАВЛЕН: Поддержка Fixed Grid + Обычное бронирование работает как раньше) ====
 app.post('/api/book/bulk', auth, async (req, res) => {
   try {
     const { slots, email, childName, parentName, childAge, country, timeZone, level, phone, isFixed } = req.body;
@@ -919,7 +919,7 @@ app.post('/api/book/bulk', auth, async (req, res) => {
             }
         }
     } else {
-        // Обычные одиночные бронирования
+        // Обычные одиночные бронирования (ВОССТАНОВЛЕНО КАК БЫЛО)
         for (const slot of slots) {
           const start = new Date(slot.startISO);
           if (isNaN(start)) continue;
@@ -1493,33 +1493,47 @@ app.post('/api/teacher/slots', requireTeacher, async (req, res) => {
   res.json({ success:true, slot });
 });
 
-// PATCH /api/teacher/slots/:id/toggle — toggle isActive И ОТМЕНА УРОКОВ
+// PATCH /api/teacher/slots/:id/toggle — toggle isActive И БЛОКИРОВКА ЕСЛИ ЕСТЬ УРОКИ
 app.patch('/api/teacher/slots/:id/toggle', requireTeacher, async (req, res) => {
   try {
     const { id } = req.params;
     const slot = await TimeSlot.findOne({ _id: id, teacherId: req.user.id }); 
     if (!slot) return res.status(404).json({ success:false, message:'Slot not found or not yours' });
     
-    slot.isActive = !slot.isActive;
-    await slot.save();
-
-    // ОБНОВЛЕНИЕ: Каскадное действие если слот закрывается (становится неактивным)
-    if (!slot.isActive && slot.kind === 'recurring') {
+    // ПРОВЕРКА: Если слот закрывается, проверяем нет ли на нем уроков
+    if (slot.isActive) {
         const now = new Date();
         const nextMonth = new Date(now.getTime() + 35 * 24 * 60 * 60 * 1000); // на 5 недель
-        const bookings = await Booking.find({ 
-            teacherId: req.user.id,
-            start: { $gte: now, $lte: nextMonth },
-            status: { $in: ['PendingPayment', 'Scheduled', 'Rescheduled'] }
-        });
-        for (const b of bookings) {
-            // Если совпадает день недели и время
-            if (b.start.getUTCDay() === slot.dow && b.timeStr === slot.startTime) {
-                b.status = 'Cancelled';
-                await b.save();
+        let hasBookings = false;
+
+        if (slot.kind === 'recurring') {
+            const bookings = await Booking.find({ 
+                teacherId: req.user.id,
+                start: { $gte: now, $lte: nextMonth },
+                status: { $in: ['PendingPayment', 'Scheduled', 'Rescheduled'] }
+            });
+            for (const b of bookings) {
+                if (b.start.getUTCDay() === slot.dow && b.timeStr === slot.startTime) {
+                    hasBookings = true; break;
+                }
             }
+        } else {
+             // Для одноразового слота
+             const b = await Booking.findOne({
+                 teacherId: req.user.id,
+                 start: slot.startISO,
+                 status: { $in: ['PendingPayment', 'Scheduled', 'Rescheduled'] }
+             });
+             if (b) hasBookings = true;
+        }
+
+        if (hasBookings) {
+            return res.status(400).json({ success: false, message: 'Невозможно закрыть слот: на это время уже забронированы уроки.' });
         }
     }
+
+    slot.isActive = !slot.isActive;
+    await slot.save();
 
     res.json({ success:true, isActive: slot.isActive });
   } catch(e) {
@@ -1527,17 +1541,19 @@ app.patch('/api/teacher/slots/:id/toggle', requireTeacher, async (req, res) => {
   }
 });
 
-// DELETE /api/teacher/slots/:id — delete slot И ОТМЕНА УРОКОВ
+// DELETE /api/teacher/slots/:id — delete slot И БЛОКИРОВКА ЕСЛИ ЕСТЬ УРОКИ
 app.delete('/api/teacher/slots/:id', requireTeacher, async (req, res) => {
   try {
     const { id } = req.params;
     const slot = await TimeSlot.findOne({ _id: id, teacherId: req.user.id });
     if (!slot) return res.status(404).json({ success:false, message:'Slot not found' });
 
-    // ОБНОВЛЕНИЕ: Каскадное удаление уроков
+    // ПРОВЕРКА: Нельзя удалить слот, если на нем есть уроки
+    const now = new Date();
+    const nextMonth = new Date(now.getTime() + 35 * 24 * 60 * 60 * 1000);
+    let hasBookings = false;
+
     if (slot.kind === 'recurring') {
-        const now = new Date();
-        const nextMonth = new Date(now.getTime() + 35 * 24 * 60 * 60 * 1000);
         const bookings = await Booking.find({ 
             teacherId: req.user.id,
             start: { $gte: now, $lte: nextMonth },
@@ -1545,10 +1561,20 @@ app.delete('/api/teacher/slots/:id', requireTeacher, async (req, res) => {
         });
         for (const b of bookings) {
             if (b.start.getUTCDay() === slot.dow && b.timeStr === slot.startTime) {
-                b.status = 'Cancelled';
-                await b.save();
+                hasBookings = true; break;
             }
         }
+    } else {
+         const b = await Booking.findOne({
+             teacherId: req.user.id,
+             start: slot.startISO,
+             status: { $in: ['PendingPayment', 'Scheduled', 'Rescheduled'] }
+         });
+         if (b) hasBookings = true;
+    }
+
+    if (hasBookings) {
+        return res.status(400).json({ success: false, message: 'Невозможно удалить слот: на это время уже забронированы уроки.' });
     }
 
     await TimeSlot.deleteOne({ _id: id });
