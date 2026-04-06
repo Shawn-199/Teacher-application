@@ -1658,7 +1658,7 @@
                 startTime: s.startTime || formatTime(s.timeObj)
             }));
 
-            const res = await fetch(`${API_BASE}/api/book-multi`, {
+            const res = await fetch(`${API_BASE}/api/book/bulk`, {
                 method: 'POST',
                 headers: getAuthHeaders(),
                 body: JSON.stringify({ 

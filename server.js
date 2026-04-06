@@ -558,18 +558,43 @@ app.get('/api/me', optionalAuth, async (req, res) => {
 
 /* ---------------- Bookings (student) ---------------- */
 
-// Helper to check if a slot is already booked (excluding a specific booking id) – using start field and duration
-async function isSlotBooked(start, duration = 25, excludeId = null) {
+// Helper to check if a slot is already booked (excluding a specific booking id)
+async function isSlotBooked(start, duration = 25, excludeId = null, studentId = null) {
   const end = new Date(start.getTime() + duration * 60 * 1000);
+  
+  // 1. Проверяем Booking (уже забронированные уроки)
   const query = {
-    status: { $in: ['Scheduled', 'Rescheduled', 'PendingPayment'] }, // Added PendingPayment to prevent double booking of unpaid slots
+    status: { $in: ['Scheduled', 'Rescheduled', 'PendingPayment'] }, 
     $or: [
-      { start: { $lt: end }, end: { $gt: start } } // any overlap
+      { start: { $lt: end }, end: { $gt: start } } 
     ]
   };
   if (excludeId) query._id = { $ne: excludeId };
-  const existing = await Booking.findOne(query);
-  return !!existing;
+  const existingBooking = await Booking.findOne(query);
+  if (existingBooking) return true;
+
+  // 2. Проверяем TimeSlot (закрытые учителем слоты или Fixed слоты других студентов)
+  const dow = start.getUTCDay();
+  const timeStr = start.toISOString().split('T')[1].substring(0,5);
+  
+  const blockingSlots = await TimeSlot.find({
+    $or: [
+      { kind: 'oneoff', startISO: { $lt: end }, endISO: { $gt: start } },
+      { kind: 'recurring', dow: dow, startTime: timeStr }
+    ]
+  });
+
+  for (const slot of blockingSlots) {
+     // Слот явно закрыт учителем (OFF блок)
+     if (slot.isActive === false) return true;
+     
+     // Слот закреплен за другим учеником
+     if (slot.studentId && studentId && slot.studentId.toString() !== studentId.toString()) {
+        return true;
+     }
+  }
+
+  return false;
 }
 
 // Helper to get next month key (YYYY-MM)
@@ -699,11 +724,6 @@ app.post('/api/bookings/trial', optionalAuth, async (req, res) => {
     if (isNaN(start)) return res.status(400).json({ success:false, message:'Invalid startISO' });
     const end = new Date(start.getTime() + 25 * 60 * 1000); // 25 minutes
 
-    // Check if slot already taken
-    if (await isSlotBooked(start)) {
-      return res.status(409).json({ success:false, message:'This time slot is already booked' });
-    }
-
     // Extract dateStr and timeStr from start for legacy fields
     const dateStr = start.toISOString().split('T')[0];
     const timeStr = start.toISOString().split('T')[1].substring(0,5); // "HH:MM"
@@ -724,6 +744,11 @@ app.post('/api/bookings/trial', optionalAuth, async (req, res) => {
         email, passwordHash: await bcrypt.hash(Math.random().toString(36).slice(2), 10),
         role: 'student', isGuest: true
       });
+    }
+
+    // Check if slot already taken (с передачей userDoc._id)
+    if (await isSlotBooked(start, 25, null, userDoc._id)) {
+      return res.status(409).json({ success:false, message:'This time slot is already booked' });
     }
 
     const booking = await Booking.create({
@@ -801,9 +826,12 @@ app.post('/api/book', auth, async (req, res) => {
     const timeStr = start.toISOString().split('T')[1].substring(0,5);
 
     // Check if slot already taken
-    if (await isSlotBooked(start)) {
+    if (await isSlotBooked(start, 25, null, req.user.uid)) {
       return res.status(409).json({ success:false, message:'This time slot is already booked' });
     }
+
+    const studentUser = await User.findById(req.user.uid);
+    const assignedTeacherId = studentUser ? studentUser.assignedTeacher : null;
 
     // Handle deferred credit if requested
     const monthKey = getMonthKey(start);
@@ -826,7 +854,7 @@ app.post('/api/book', auth, async (req, res) => {
       dateStr, timeStr, level,
       status: 'PendingPayment', // <--- ТЕПЕРЬ СТАТУС БУДЕТ ОЖИДАТЬ ОПЛАТЫ
       teacherName: process.env.TEACHER_NAME || 'Teacher',
-      // teacherId can be set later
+      teacherId: assignedTeacherId, // can be set later if null
       start, end
     });
 
@@ -871,7 +899,7 @@ app.post('/api/book', auth, async (req, res) => {
   }
 });
 
-// ==== BULK BOOKING ENDPOINT (ИСПРАВЛЕН: Поддержка Fixed Grid + Обычное бронирование работает как раньше) ====
+// ==== BULK BOOKING ENDPOINT (ИСПРАВЛЕН: Поддержка Fixed Grid + Обычное бронирование) ====
 app.post('/api/book/bulk', auth, async (req, res) => {
   try {
     const { slots, email, childName, parentName, childAge, country, timeZone, level, phone, isFixed } = req.body;
@@ -880,6 +908,8 @@ app.post('/api/book/bulk', auth, async (req, res) => {
     }
     
     const createdBookings = [];
+    const studentUser = await User.findById(req.user.uid);
+    const assignedTeacherId = studentUser ? studentUser.assignedTeacher : null;
 
     if (isFixed) {
         // Создаем бронирования на месяц (4 недели вперед) и закрепляем в Fixed Grid
@@ -887,23 +917,25 @@ app.post('/api/book/bulk', auth, async (req, res) => {
             const start = new Date(slot.startISO);
             if (isNaN(start)) continue;
 
-            // 1. Создаем TimeSlot (Recurring) чтобы он всегда был закреплен
-            await TimeSlot.create({
-                kind: 'recurring',
-                dow: start.getUTCDay(),
-                startTime: start.toISOString().split('T')[1].substring(0,5),
-                studentId: req.user.uid,
-                studentName: childName || 'Student',
-                isActive: true,
-                teacherName: process.env.TEACHER_NAME || 'Teacher'
-            });
+            // 1. Создаем/обновляем TimeSlot (Recurring) С ПРИВЯЗКОЙ К УЧИТЕЛЮ
+            await TimeSlot.findOneAndUpdate(
+                { kind: 'recurring', dow: start.getUTCDay(), startTime: start.toISOString().split('T')[1].substring(0,5) },
+                { 
+                    studentId: req.user.uid, 
+                    studentName: childName || 'Student', 
+                    isActive: true, 
+                    teacherId: assignedTeacherId, // <--- КРИТИЧНОЕ ИСПРАВЛЕНИЕ
+                    teacherName: process.env.TEACHER_NAME || 'Teacher' 
+                },
+                { upsert: true, new: true }
+            );
 
             // 2. Генерируем Booking(и) на этот месяц (4 урока)
             for (let i = 0; i < 4; i++) {
                 const bStart = new Date(start.getTime() + i * 7 * 24 * 60 * 60 * 1000);
                 const bEnd = new Date(bStart.getTime() + 25 * 60 * 1000);
 
-                if (await isSlotBooked(bStart)) continue;
+                if (await isSlotBooked(bStart, 25, null, req.user.uid)) continue;
 
                 const booking = await Booking.create({
                     user: req.user.uid, email, childName, parentName, childAge, country, timeZone,
@@ -912,6 +944,7 @@ app.post('/api/book/bulk', auth, async (req, res) => {
                     timeStr: bStart.toISOString().split('T')[1].substring(0,5),
                     level,
                     status: 'PendingPayment',
+                    teacherId: assignedTeacherId, // <--- КРИТИЧНОЕ ИСПРАВЛЕНИЕ
                     teacherName: process.env.TEACHER_NAME || 'Teacher',
                     start: bStart, end: bEnd
                 });
@@ -919,25 +952,22 @@ app.post('/api/book/bulk', auth, async (req, res) => {
             }
         }
     } else {
-        // Обычные одиночные бронирования (ВОССТАНОВЛЕНО КАК БЫЛО)
+        // Обычные одиночные бронирования
         for (const slot of slots) {
           const start = new Date(slot.startISO);
           if (isNaN(start)) continue;
           
-          if (await isSlotBooked(start)) continue; // skip if already booked
+          if (await isSlotBooked(start, 25, null, req.user.uid)) continue; 
           
           const dateStr = start.toISOString().split('T')[0];
           const timeStr = start.toISOString().split('T')[1].substring(0,5);
           const end = new Date(start.getTime() + 25 * 60 * 1000);
           
           const booking = await Booking.create({
-            user: req.user.uid,
-            email, childName, parentName, childAge, country, timeZone,
-            phone: phone || '',
-            dateStr, timeStr, level,
-            status: 'PendingPayment',
-            teacherName: process.env.TEACHER_NAME || 'Teacher',
-            start, end
+            user: req.user.uid, email, childName, parentName, childAge, country, timeZone,
+            phone: phone || '', dateStr, timeStr, level, status: 'PendingPayment',
+            teacherId: assignedTeacherId, // <--- КРИТИЧНОЕ ИСПРАВЛЕНИЕ
+            teacherName: process.env.TEACHER_NAME || 'Teacher', start, end
           });
           createdBookings.push(booking);
         }
@@ -947,7 +977,6 @@ app.post('/api/book/bulk', auth, async (req, res) => {
       return res.status(409).json({ success: false, message: 'All selected slots were already booked' });
     }
 
-    // Отправляем ОДНО суммарное письмо администратору о массовом бронировании
     const slotsHtml = createdBookings.map(b => `<li>${b.dateStr} at ${b.timeStr}</li>`).join('');
     await sendEmail({
       to: ADMIN_TO,
@@ -1036,7 +1065,7 @@ app.post('/api/bookings/:id/reschedule', auth, async (req, res) => {
     const newTimeStr = newStart.toISOString().split('T')[1].substring(0,5);
 
     // Check conflict excluding current booking
-    if (await isSlotBooked(newStart, 25, b._id)) {
+    if (await isSlotBooked(newStart, 25, b._id, req.user.uid)) {
       return res.status(409).json({ success:false, message:'This time slot is already booked' });
     }
 
@@ -1486,6 +1515,7 @@ app.post('/api/teacher/slots', requireTeacher, async (req, res) => {
 
   const slotData = { 
     ...req.body, 
+    isActive: req.body.isActive !== undefined ? req.body.isActive : true,
     teacherId, 
     teacherName: (teacher.firstName || 'Teacher') + ' ' + (teacher.lastName || '')
   };
