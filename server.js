@@ -124,7 +124,9 @@ const UserSchema = new Schema({
   role: { type: String, default: 'student' }, // 'student' | 'teacher' | 'manager' | 'admin'
   isGuest: { type: Boolean, default: false },
   // ВНЕДРЕНО: привязка конкретного препода к студенту
-  assignedTeacher: { type: Schema.Types.ObjectId, ref: 'User' } 
+  assignedTeacher: { type: Schema.Types.ObjectId, ref: 'User' },
+  // ВНЕДРЕНО: для сброса пароля
+  resetCode: { type: String }
 }, { timestamps: true });
 const User = model('User', UserSchema);
 
@@ -322,7 +324,7 @@ async function requireTeacher(req, res, next) {
       ['admin', 'teacher', 'manager'].includes(u.role)
     ) {
       // Сохраняем данные пользователя в объекте запроса для дальнейшего использования
-      req.user = { id: u._id, email: u.email, role: u.role }; 
+      req.user = { id: u._id, email: u.email, role: u.role, uid: u._id }; 
       return next(); // Доступ разрешен, идем дальше
     }
 
@@ -472,6 +474,41 @@ app.post('/submit', (req, res) => {
 });
 
 /* ---------------- Auth APIs ---------------- */
+
+// --- Восстановление пароля ---
+app.post('/api/forgot-password/send-code', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ success: false, message: 'Email required' });
+    const user = await User.findOne({ email: email.toLowerCase() });
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    user.resetCode = code;
+    await user.save();
+
+    await sendEmail({
+      to: email,
+      subject: `Your Password Reset Code: ${code}`,
+      html: `<h3>Password Reset</h3><p>Hello,</p><p>Your code to reset your password is: <strong style="color:#2563EB; font-size: 20px;">${code}</strong></p>`
+    });
+    res.json({ success: true, message: 'Code sent' });
+  } catch(e) { res.status(500).json({ success: false, message: 'Server error' }); }
+});
+
+app.post('/api/forgot-password/reset', async (req, res) => {
+  try {
+    const { email, code, newPassword } = req.body;
+    const user = await User.findOne({ email: email.toLowerCase(), resetCode: code });
+    if (!user) return res.status(400).json({ success: false, message: 'Invalid code or email' });
+
+    user.passwordHash = await bcrypt.hash(newPassword, 10);
+    user.resetCode = undefined;
+    await user.save();
+    res.json({ success: true, message: 'Password updated' });
+  } catch(e) { res.status(500).json({ success: false, message: 'Server error' }); }
+});
+
 app.post('/api/register', async (req, res) => {
   try {
     const { fullName, email, password } = req.body;
@@ -834,35 +871,76 @@ app.post('/api/book', auth, async (req, res) => {
   }
 });
 
-// ==== NEW: BULK BOOKING ENDPOINT ====
+// ==== BULK BOOKING ENDPOINT (ОБНОВЛЕНО: Поддержка Fixed Grid) ====
 app.post('/api/book/bulk', auth, async (req, res) => {
   try {
-    const { slots, email, childName, parentName, childAge, country, timeZone, level, phone } = req.body;
+    const { slots, email, childName, parentName, childAge, country, timeZone, level, phone, isFixed } = req.body;
     if (!slots || !Array.isArray(slots) || slots.length === 0) {
       return res.status(400).json({ success: false, message: 'No slots provided' });
     }
     
     const createdBookings = [];
-    for (const slot of slots) {
-      const start = new Date(slot.startISO);
-      if (isNaN(start)) continue;
-      
-      if (await isSlotBooked(start)) continue; // skip if already booked
-      
-      const dateStr = start.toISOString().split('T')[0];
-      const timeStr = start.toISOString().split('T')[1].substring(0,5);
-      const end = new Date(start.getTime() + 25 * 60 * 1000);
-      
-      const booking = await Booking.create({
-        user: req.user.uid,
-        email, childName, parentName, childAge, country, timeZone,
-        phone: phone || '',
-        dateStr, timeStr, level,
-        status: 'PendingPayment',
-        teacherName: process.env.TEACHER_NAME || 'Teacher',
-        start, end
-      });
-      createdBookings.push(booking);
+
+    if (isFixed) {
+        // Создаем бронирования на месяц (4 недели вперед) и закрепляем в Fixed Grid
+        for (const slot of slots) {
+            const start = new Date(slot.startISO);
+            if (isNaN(start)) continue;
+
+            // 1. Создаем TimeSlot (Recurring) чтобы он всегда был закреплен
+            await TimeSlot.create({
+                kind: 'recurring',
+                dow: start.getUTCDay(),
+                startTime: start.toISOString().split('T')[1].substring(0,5),
+                studentId: req.user.uid,
+                studentName: childName || 'Student',
+                isActive: true,
+                teacherName: process.env.TEACHER_NAME || 'Teacher'
+            });
+
+            // 2. Генерируем Booking(и) на этот месяц (4 урока)
+            for (let i = 0; i < 4; i++) {
+                const bStart = new Date(start.getTime() + i * 7 * 24 * 60 * 60 * 1000);
+                const bEnd = new Date(bStart.getTime() + 25 * 60 * 1000);
+
+                if (await isSlotBooked(bStart)) continue;
+
+                const booking = await Booking.create({
+                    user: req.user.uid, email, childName, parentName, childAge, country, timeZone,
+                    phone: phone || '',
+                    dateStr: bStart.toISOString().split('T')[0],
+                    timeStr: bStart.toISOString().split('T')[1].substring(0,5),
+                    level,
+                    status: 'PendingPayment',
+                    teacherName: process.env.TEACHER_NAME || 'Teacher',
+                    start: bStart, end: bEnd
+                });
+                createdBookings.push(booking);
+            }
+        }
+    } else {
+        // Обычные одиночные бронирования
+        for (const slot of slots) {
+          const start = new Date(slot.startISO);
+          if (isNaN(start)) continue;
+          
+          if (await isSlotBooked(start)) continue; // skip if already booked
+          
+          const dateStr = start.toISOString().split('T')[0];
+          const timeStr = start.toISOString().split('T')[1].substring(0,5);
+          const end = new Date(start.getTime() + 25 * 60 * 1000);
+          
+          const booking = await Booking.create({
+            user: req.user.uid,
+            email, childName, parentName, childAge, country, timeZone,
+            phone: phone || '',
+            dateStr, timeStr, level,
+            status: 'PendingPayment',
+            teacherName: process.env.TEACHER_NAME || 'Teacher',
+            start, end
+          });
+          createdBookings.push(booking);
+        }
     }
     
     if (createdBookings.length === 0) {
@@ -880,6 +958,7 @@ app.post('/api/book/bulk', auth, async (req, res) => {
         <p><strong>Родитель:</strong> ${parentName}</p>
         <p><strong>Почта:</strong> ${email}</p>
         <p><strong>Всего уроков:</strong> ${createdBookings.length}</p>
+        <p><strong>Тип:</strong> ${isFixed ? 'Fixed Slots (4 Weeks)' : 'One-off'}</p>
         <ul>${slotsHtml}</ul>
       `
     });
@@ -1414,21 +1493,69 @@ app.post('/api/teacher/slots', requireTeacher, async (req, res) => {
   res.json({ success:true, slot });
 });
 
-// PATCH /api/teacher/slots/:id/toggle — toggle isActive
+// PATCH /api/teacher/slots/:id/toggle — toggle isActive И ОТМЕНА УРОКОВ
 app.patch('/api/teacher/slots/:id/toggle', requireTeacher, async (req, res) => {
-  const { id } = req.params;
-  const slot = await TimeSlot.findOne({ _id: id, teacherId: req.user.id }); 
-  if (!slot) return res.status(404).json({ success:false, message:'Slot not found or not yours' });
-  slot.isActive = !slot.isActive;
-  await slot.save();
-  res.json({ success:true, isActive: slot.isActive });
+  try {
+    const { id } = req.params;
+    const slot = await TimeSlot.findOne({ _id: id, teacherId: req.user.id }); 
+    if (!slot) return res.status(404).json({ success:false, message:'Slot not found or not yours' });
+    
+    slot.isActive = !slot.isActive;
+    await slot.save();
+
+    // ОБНОВЛЕНИЕ: Каскадное действие если слот закрывается (становится неактивным)
+    if (!slot.isActive && slot.kind === 'recurring') {
+        const now = new Date();
+        const nextMonth = new Date(now.getTime() + 35 * 24 * 60 * 60 * 1000); // на 5 недель
+        const bookings = await Booking.find({ 
+            teacherId: req.user.id,
+            start: { $gte: now, $lte: nextMonth },
+            status: { $in: ['PendingPayment', 'Scheduled', 'Rescheduled'] }
+        });
+        for (const b of bookings) {
+            // Если совпадает день недели и время
+            if (b.start.getUTCDay() === slot.dow && b.timeStr === slot.startTime) {
+                b.status = 'Cancelled';
+                await b.save();
+            }
+        }
+    }
+
+    res.json({ success:true, isActive: slot.isActive });
+  } catch(e) {
+    res.status(500).json({ success:false, message:e.message });
+  }
 });
 
-// DELETE /api/teacher/slots/:id — delete slot
+// DELETE /api/teacher/slots/:id — delete slot И ОТМЕНА УРОКОВ
 app.delete('/api/teacher/slots/:id', requireTeacher, async (req, res) => {
-  const { id } = req.params;
-  const result = await TimeSlot.deleteOne({ _id: id, teacherId: req.user.id }); 
-  res.json({ success: result.deletedCount > 0 });
+  try {
+    const { id } = req.params;
+    const slot = await TimeSlot.findOne({ _id: id, teacherId: req.user.id });
+    if (!slot) return res.status(404).json({ success:false, message:'Slot not found' });
+
+    // ОБНОВЛЕНИЕ: Каскадное удаление уроков
+    if (slot.kind === 'recurring') {
+        const now = new Date();
+        const nextMonth = new Date(now.getTime() + 35 * 24 * 60 * 60 * 1000);
+        const bookings = await Booking.find({ 
+            teacherId: req.user.id,
+            start: { $gte: now, $lte: nextMonth },
+            status: { $in: ['PendingPayment', 'Scheduled', 'Rescheduled'] }
+        });
+        for (const b of bookings) {
+            if (b.start.getUTCDay() === slot.dow && b.timeStr === slot.startTime) {
+                b.status = 'Cancelled';
+                await b.save();
+            }
+        }
+    }
+
+    await TimeSlot.deleteOne({ _id: id });
+    res.json({ success: true });
+  } catch(e) {
+    res.status(500).json({ success:false, message:e.message });
+  }
 });
 
 /* ---------------- Schedule feed & Admin Slots ---------------- */
