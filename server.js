@@ -558,8 +558,8 @@ app.get('/api/me', optionalAuth, async (req, res) => {
 
 /* ---------------- Bookings (student) ---------------- */
 
-// Helper to check if a slot is already booked (excluding a specific booking id)
-async function isSlotBooked(start, duration = 25, excludeId = null, studentId = null) {
+// ИСПРАВЛЕНИЕ: Добавлен teacherId для фильтрации по конкретному преподавателю
+async function isSlotBooked(start, duration = 25, excludeId = null, studentId = null, teacherId = null) {
   const end = new Date(start.getTime() + duration * 60 * 1000);
   
   // 1. Проверяем Booking (уже забронированные уроки)
@@ -570,6 +570,8 @@ async function isSlotBooked(start, duration = 25, excludeId = null, studentId = 
     ]
   };
   if (excludeId) query._id = { $ne: excludeId };
+  if (teacherId) query.teacherId = teacherId; // Фильтруем по преподавателю
+  
   const existingBooking = await Booking.findOne(query);
   if (existingBooking) return true;
 
@@ -577,12 +579,15 @@ async function isSlotBooked(start, duration = 25, excludeId = null, studentId = 
   const dow = start.getUTCDay();
   const timeStr = start.toISOString().split('T')[1].substring(0,5);
   
-  const blockingSlots = await TimeSlot.find({
+  const slotQuery = {
     $or: [
       { kind: 'oneoff', startISO: { $lt: end }, endISO: { $gt: start } },
       { kind: 'recurring', dow: dow, startTime: timeStr }
     ]
-  });
+  };
+  if (teacherId) slotQuery.teacherId = teacherId; // Фильтруем по преподавателю
+
+  const blockingSlots = await TimeSlot.find(slotQuery);
 
   for (const slot of blockingSlots) {
      // Слот явно закрыт учителем (OFF блок)
@@ -746,8 +751,8 @@ app.post('/api/bookings/trial', optionalAuth, async (req, res) => {
       });
     }
 
-    // Check if slot already taken (с передачей userDoc._id)
-    if (await isSlotBooked(start, 25, null, userDoc._id)) {
+    // ИСПРАВЛЕНИЕ: Передача null в качестве teacherId для триал урока (учитель назначается позже)
+    if (await isSlotBooked(start, 25, null, userDoc._id, null)) {
       return res.status(409).json({ success:false, message:'This time slot is already booked' });
     }
 
@@ -811,7 +816,7 @@ app.post('/api/bookings/trial', optionalAuth, async (req, res) => {
   }
 });
 
-// Regular booking endpoint (for schedule lessons) – also updated to accept startISO and optional useDeferred
+// Regular booking endpoint (for schedule lessons)
 app.post('/api/book', auth, async (req, res) => {
   try {
     const { email, childName, parentName, childAge, country, timeZone, level, phone, startISO, useDeferred } = req.body;
@@ -825,13 +830,13 @@ app.post('/api/book', auth, async (req, res) => {
     const dateStr = start.toISOString().split('T')[0];
     const timeStr = start.toISOString().split('T')[1].substring(0,5);
 
-    // Check if slot already taken
-    if (await isSlotBooked(start, 25, null, req.user.uid)) {
-      return res.status(409).json({ success:false, message:'This time slot is already booked' });
-    }
-
     const studentUser = await User.findById(req.user.uid);
     const assignedTeacherId = studentUser ? studentUser.assignedTeacher : null;
+
+    // ИСПРАВЛЕНИЕ: Передача assignedTeacherId для проверки конфликтов именно у этого учителя
+    if (await isSlotBooked(start, 25, null, req.user.uid, assignedTeacherId)) {
+      return res.status(409).json({ success:false, message:'This time slot is already booked' });
+    }
 
     // Handle deferred credit if requested
     const monthKey = getMonthKey(start);
@@ -852,9 +857,9 @@ app.post('/api/book', auth, async (req, res) => {
       email, childName, parentName, childAge, country, timeZone,
       phone: phone || '',
       dateStr, timeStr, level,
-      status: 'PendingPayment', // <--- ТЕПЕРЬ СТАТУС БУДЕТ ОЖИДАТЬ ОПЛАТЫ
+      status: 'PendingPayment', 
       teacherName: process.env.TEACHER_NAME || 'Teacher',
-      teacherId: assignedTeacherId, // can be set later if null
+      teacherId: assignedTeacherId, 
       start, end
     });
 
@@ -917,9 +922,14 @@ app.post('/api/book/bulk', auth, async (req, res) => {
             const start = new Date(slot.startISO);
             if (isNaN(start)) continue;
 
-            // 1. Создаем/обновляем TimeSlot (Recurring) С ПРИВЯЗКОЙ К УЧИТЕЛЮ
+            // ИСПРАВЛЕНИЕ: добавление teacherId в фильтр findOneAndUpdate
             await TimeSlot.findOneAndUpdate(
-                { kind: 'recurring', dow: start.getUTCDay(), startTime: start.toISOString().split('T')[1].substring(0,5) },
+                { 
+                    kind: 'recurring', 
+                    dow: start.getUTCDay(), 
+                    startTime: start.toISOString().split('T')[1].substring(0,5),
+                    teacherId: assignedTeacherId // <--- ДОБАВЛЕНО В ФИЛЬТР
+                },
                 { 
                     studentId: req.user.uid, 
                     studentName: childName || 'Student', 
@@ -935,7 +945,8 @@ app.post('/api/book/bulk', auth, async (req, res) => {
                 const bStart = new Date(start.getTime() + i * 7 * 24 * 60 * 60 * 1000);
                 const bEnd = new Date(bStart.getTime() + 25 * 60 * 1000);
 
-                if (await isSlotBooked(bStart, 25, null, req.user.uid)) continue;
+                // ИСПРАВЛЕНИЕ: Вызов проверки с teacherId
+                if (await isSlotBooked(bStart, 25, null, req.user.uid, assignedTeacherId)) continue;
 
                 const booking = await Booking.create({
                     user: req.user.uid, email, childName, parentName, childAge, country, timeZone,
@@ -957,7 +968,8 @@ app.post('/api/book/bulk', auth, async (req, res) => {
           const start = new Date(slot.startISO);
           if (isNaN(start)) continue;
           
-          if (await isSlotBooked(start, 25, null, req.user.uid)) continue; 
+          // ИСПРАВЛЕНИЕ: Вызов проверки с teacherId
+          if (await isSlotBooked(start, 25, null, req.user.uid, assignedTeacherId)) continue; 
           
           const dateStr = start.toISOString().split('T')[0];
           const timeStr = start.toISOString().split('T')[1].substring(0,5);
@@ -1064,8 +1076,8 @@ app.post('/api/bookings/:id/reschedule', auth, async (req, res) => {
     const newDateStr = newStart.toISOString().split('T')[0];
     const newTimeStr = newStart.toISOString().split('T')[1].substring(0,5);
 
-    // Check conflict excluding current booking
-    if (await isSlotBooked(newStart, 25, b._id, req.user.uid)) {
+    // ИСПРАВЛЕНИЕ: Вызов с передачей b.teacherId
+    if (await isSlotBooked(newStart, 25, b._id, req.user.uid, b.teacherId)) {
       return res.status(409).json({ success:false, message:'This time slot is already booked' });
     }
 
@@ -1131,7 +1143,6 @@ app.post('/api/admin/test-email', requireAdmin, async (req, res) => {
     res.status(500).json({ success:false, message:String(e) });
   }
 });
-
 
 // GET /api/admin/users — список пользователей с датой регистрации
 app.get('/api/admin/users', requireAdmin, async (req, res) => {
@@ -1523,19 +1534,41 @@ app.post('/api/teacher/slots', requireTeacher, async (req, res) => {
   res.json({ success:true, slot });
 });
 
-// PATCH /api/teacher/slots/:id/toggle — toggle isActive И БЛОКИРОВКА ЕСЛИ ЕСТЬ УРОКИ
+// ИСПРАВЛЕНИЕ: PATCH /api/teacher/slots/:id/toggle — toggle isActive И БЛОКИРОВКА < 12 ЧАСОВ
 app.patch('/api/teacher/slots/:id/toggle', requireTeacher, async (req, res) => {
   try {
     const { id } = req.params;
     const slot = await TimeSlot.findOne({ _id: id, teacherId: req.user.id }); 
     if (!slot) return res.status(404).json({ success:false, message:'Slot not found or not yours' });
     
-    // ПРОВЕРКА: Если слот закрывается, проверяем нет ли на нем уроков
+    // ПРОВЕРКА: Если слот закрывается, проверяем 12 часов и наличие уроков
     if (slot.isActive) {
         const now = new Date();
-        const nextMonth = new Date(now.getTime() + 35 * 24 * 60 * 60 * 1000); // на 5 недель
+        const next12h = new Date(now.getTime() + 12 * 60 * 60 * 1000); // 12 часов с текущего момента
+        const nextMonth = new Date(now.getTime() + 35 * 24 * 60 * 60 * 1000); // на 5 недель вперед
         let hasBookings = false;
 
+        // --- 1. Проверка на 12 часов ---
+        if (slot.kind === 'oneoff') {
+            if (slot.startISO > now && slot.startISO < next12h) {
+                return res.status(400).json({ success: false, message: 'Нельзя закрыть слот менее чем за 12 часов до начала.' });
+            }
+        } else if (slot.kind === 'recurring') {
+            let testDate = new Date(now);
+            const [h, m] = String(slot.startTime).split(':').map(Number);
+            for(let i = 0; i < 7; i++) {
+                if (testDate.getUTCDay() === slot.dow) {
+                    let instance = new Date(testDate);
+                    instance.setUTCHours(h, m, 0, 0);
+                    if (instance > now && instance < next12h) {
+                         return res.status(400).json({ success: false, message: 'Ближайший слот по этому расписанию начнется менее чем через 12 часов. Закрытие запрещено.' });
+                    }
+                }
+                testDate.setDate(testDate.getDate() + 1);
+            }
+        }
+
+        // --- 2. Проверка на наличие бронирований ---
         if (slot.kind === 'recurring') {
             const bookings = await Booking.find({ 
                 teacherId: req.user.id,
@@ -1548,7 +1581,6 @@ app.patch('/api/teacher/slots/:id/toggle', requireTeacher, async (req, res) => {
                 }
             }
         } else {
-             // Для одноразового слота
              const b = await Booking.findOne({
                  teacherId: req.user.id,
                  start: slot.startISO,
