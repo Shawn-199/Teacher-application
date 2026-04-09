@@ -1534,15 +1534,27 @@ app.post('/api/teacher/slots', requireTeacher, async (req, res) => {
   res.json({ success:true, slot });
 });
 
-// ИСПРАВЛЕНИЕ: PATCH /api/teacher/slots/:id/toggle — toggle isActive И БЛОКИРОВКА < 12 ЧАСОВ
+// ИСПРАВЛЕНИЕ: PATCH /api/teacher/slots/:id/toggle — toggle isActive И БЛОКИРОВКА < 12 ЧАСОВ + УПРОЩЕН ДОСТУП АДМИНАМ
 app.patch('/api/teacher/slots/:id/toggle', requireTeacher, async (req, res) => {
   try {
     const { id } = req.params;
-    const slot = await TimeSlot.findOne({ _id: id, teacherId: req.user.id }); 
-    if (!slot) return res.status(404).json({ success:false, message:'Slot not found or not yours' });
+    const query = { _id: id };
     
-    // ПРОВЕРКА: Если слот закрывается, проверяем 12 часов и наличие уроков
+    // Если это не админ и не менеджер, применяем фильтр по ID преподавателя
+    if (!['admin', 'manager'].includes(req.user.role) && req.user.email !== 'shakhrom.azimov99@gmail.com') {
+        query.teacherId = req.user.id;
+    }
+
+    const slot = await TimeSlot.findOne(query); 
+    if (!slot) return res.status(404).json({ success:false, message:'Slot not found or access denied' });
+    
+    // ПРОВЕРКА: Если слот закрывается
     if (slot.isActive) {
+        // ИСПРАВЛЕНИЕ 1: Нельзя закрывать слот, забронированный через Fixed Grid
+        if (slot.studentId) {
+            return res.status(400).json({ success: false, message: 'Этот слот закреплен за студентом (Fixed Grid). Вы не можете его закрыть, пока не открепите ученика.' });
+        }
+
         const now = new Date();
         const next12h = new Date(now.getTime() + 12 * 60 * 60 * 1000); // 12 часов с текущего момента
         const nextMonth = new Date(now.getTime() + 35 * 24 * 60 * 60 * 1000); // на 5 недель вперед
@@ -1571,18 +1583,19 @@ app.patch('/api/teacher/slots/:id/toggle', requireTeacher, async (req, res) => {
         // --- 2. Проверка на наличие бронирований ---
         if (slot.kind === 'recurring') {
             const bookings = await Booking.find({ 
-                teacherId: req.user.id,
+                teacherId: slot.teacherId, // Ищем по учителю слота, а не только по req.user.id
                 start: { $gte: now, $lte: nextMonth },
                 status: { $in: ['PendingPayment', 'Scheduled', 'Rescheduled'] }
             });
             for (const b of bookings) {
-                if (b.start.getUTCDay() === slot.dow && b.timeStr === slot.startTime) {
+                // ИСПРАВЛЕНИЕ 2: Защита от битых дат b.start
+                if (b.start && b.start.getUTCDay() === slot.dow && b.timeStr === slot.startTime) {
                     hasBookings = true; break;
                 }
             }
         } else {
              const b = await Booking.findOne({
-                 teacherId: req.user.id,
+                 teacherId: slot.teacherId,
                  start: slot.startISO,
                  status: { $in: ['PendingPayment', 'Scheduled', 'Rescheduled'] }
              });
@@ -1607,8 +1620,20 @@ app.patch('/api/teacher/slots/:id/toggle', requireTeacher, async (req, res) => {
 app.delete('/api/teacher/slots/:id', requireTeacher, async (req, res) => {
   try {
     const { id } = req.params;
-    const slot = await TimeSlot.findOne({ _id: id, teacherId: req.user.id });
-    if (!slot) return res.status(404).json({ success:false, message:'Slot not found' });
+    const query = { _id: id };
+    
+    // Если это не админ и не менеджер, применяем фильтр по ID преподавателя
+    if (!['admin', 'manager'].includes(req.user.role) && req.user.email !== 'shakhrom.azimov99@gmail.com') {
+        query.teacherId = req.user.id;
+    }
+
+    const slot = await TimeSlot.findOne(query);
+    if (!slot) return res.status(404).json({ success:false, message:'Slot not found or access denied' });
+
+    // ИСПРАВЛЕНИЕ: Блокировка удаления слотов Fixed Grid
+    if (slot.studentId) {
+        return res.status(400).json({ success: false, message: 'Этот слот закреплен за студентом (Fixed Grid). Вы не можете его удалить.' });
+    }
 
     // ПРОВЕРКА: Нельзя удалить слот, если на нем есть уроки
     const now = new Date();
@@ -1617,18 +1642,19 @@ app.delete('/api/teacher/slots/:id', requireTeacher, async (req, res) => {
 
     if (slot.kind === 'recurring') {
         const bookings = await Booking.find({ 
-            teacherId: req.user.id,
+            teacherId: slot.teacherId,
             start: { $gte: now, $lte: nextMonth },
             status: { $in: ['PendingPayment', 'Scheduled', 'Rescheduled'] }
         });
         for (const b of bookings) {
-            if (b.start.getUTCDay() === slot.dow && b.timeStr === slot.startTime) {
+            // ИСПРАВЛЕНИЕ: Защита от битых дат
+            if (b.start && b.start.getUTCDay() === slot.dow && b.timeStr === slot.startTime) {
                 hasBookings = true; break;
             }
         }
     } else {
          const b = await Booking.findOne({
-             teacherId: req.user.id,
+             teacherId: slot.teacherId,
              start: slot.startISO,
              status: { $in: ['PendingPayment', 'Scheduled', 'Rescheduled'] }
          });
@@ -1725,6 +1751,10 @@ app.get('/api/schedule', optionalAuth, async (req, res) => {
     // One-off slots
     for (const s of slots) {
       if (s.kind !== 'oneoff') continue;
+      
+      // ИСПРАВЛЕНИЕ 3: Скрываем слоты, которые закрыты преподавателем ИЛИ уже закреплены в Fixed Grid
+      if (!s.isActive || s.studentId) continue; 
+      
       addItem('slot', 'Available', s.startISO, s.endISO, { 
         teacherName: s.teacherName, teacherId: s.teacherId,
         isActive: s.isActive, studentId: s.studentId, studentName: s.studentName
@@ -1735,6 +1765,10 @@ app.get('/api/schedule', optionalAuth, async (req, res) => {
     const dayMs = 24 * 60 * 60 * 1000;
     for (const s of slots) {
       if (s.kind !== 'recurring') continue;
+      
+      // ИСПРАВЛЕНИЕ 3: Скрываем слоты, которые закрыты преподавателем ИЛИ уже закреплены в Fixed Grid
+      if (!s.isActive || s.studentId) continue;
+      
       const vFrom = s.validFrom ? new Date(s.validFrom) : from;
       const vTo   = s.validTo   ? new Date(s.validTo)   : to;
       const rangeStart = new Date(Math.max(vFrom.getTime(), from.getTime()));

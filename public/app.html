@@ -509,7 +509,7 @@
       margin-right: 4px;
     }
     
-    /* Scrolling and sticky headers for schedule */
+    /* Скроллинг и "липкие" заголовки для расписания */
     .schedule-grid-wrapper {
       overflow: auto;
       max-height: 65vh;
@@ -544,7 +544,7 @@
       transition: background 0.1s;
     }
     
-    /* MAKE HEADER AND COLUMN STICKY */
+    /* СДЕЛАТЬ ШАПКУ И КОЛОНКУ ЛИПКИМИ */
     .schedule-header-cell {
       background: #f8f9fc !important;
       color: #1b325f !important;
@@ -909,12 +909,12 @@
           <div class="schedule-legend">
             <span><span class="legend-dot" style="background:var(--primary);"></span> Paid</span>
             <span><span class="legend-dot" style="background:#fef3c7; border:1px solid #f59e0b;"></span> Pending review</span>
-            <span><span class="legend-dot" style="background:#b34141;"></span> Locked (&lt;12h)</span>
+            <span><span class="legend-dot" style="background:#b34141;"></span> Locked (&lt;8h)</span>
             <span><span class="legend-dot" style="background:#ffd966;"></span> Fixed</span>
             <span><span class="legend-dot" style="background:#e2ebf2;"></span> OFF</span>
             <span><span class="legend-dot" style="background:#ffb347;"></span> Move target</span>
             <span><span class="legend-dot" style="background:#fff; border:1px dashed var(--primary);"></span> Free</span>
-            <span><i class="fas fa-lock"></i> 12H lock</span>
+            <span><i class="fas fa-lock"></i> 8H lock</span>
           </div>
           <div style="display:flex; justify-content:space-between; margin:0 12px 8px; padding:8px 16px; background:var(--gray-lighter); border-radius:40px; font-size:0.75rem;">
             <span><i class="fas fa-calendar-check"></i> Lessons this month: <strong id="scheduleLessonCount">0</strong></span>
@@ -945,7 +945,7 @@
         <div class="schedule-modal-card">
           <h4 id="scheduleModalTitle" style="margin-top:0; display:flex; align-items:center; gap:8px; color:var(--primary);"><i class="fas fa-pencil-alt"></i> Lesson</h4>
           <div style="background:var(--gray-lighter); padding:12px; border-radius:18px; font-size:0.9rem; font-weight:600; margin-bottom:12px;" id="scheduleModalInfo"></div>
-          <div class="lock-warn" id="scheduleLockWarning" style="background:#ffe8d9; border-radius:14px; padding:10px; font-size:0.8rem; color:#874d00; margin:8px 0; display:none;"><i class="fas fa-lock"></i> Locked: less than 12h – only cancellation allowed</div>
+          <div class="lock-warn" id="scheduleLockWarning" style="background:#ffe8d9; border-radius:14px; padding:10px; font-size:0.8rem; color:#874d00; margin:8px 0; display:none;"><i class="fas fa-lock"></i> Locked: less than 8h – only cancellation allowed</div>
           
           <div id="studentActions">
             <button class="modal-btn btn-resched" id="scheduleRescheduleBtn" style="width:100%; padding:14px; border-radius:24px; border:none; background:var(--primary); color:white; font-weight:600; margin-top:8px; display:flex; align-items:center; justify-content:center; gap:8px;"><i class="fas fa-arrows-alt"></i> Reschedule</button>
@@ -1239,6 +1239,8 @@
           const data = await safeJson(res);
           if(res.ok && data?.user){
             AppState.profile = data.user;
+            // Store current user ID for precise slot matching (FIX 2)
+            window.currentUserId = AppState.profile._id || AppState.profile.id;
             const fullName = `${AppState.profile.firstName || ''} ${AppState.profile.lastName || ''}`.trim() || '—';
             const userFullNameEl = $('#userFullName');
             if (userFullNameEl) {
@@ -1869,8 +1871,8 @@
             }
             if (b.start) {
               const diffHours = (b.start.getTime() - Date.now()) / 3600000;
-              if (diffHours < 12) {
-                showToast('Cannot reschedule less than 12 hours before the lesson.', 'warn');
+              if (diffHours < 8) {
+                showToast('Cannot reschedule less than 8 hours before the lesson.', 'warn');
                 return;
               }
             }
@@ -2087,27 +2089,48 @@
         }
       }
 
-      // TEACHER MODAL ACTIONS
+      // TEACHER MODAL ACTIONS (FIX 1: improved error handling)
       let tsmTargetAction = null; 
       $('#tsmConfirmBtn').onclick = async () => {
         if(!tsmTargetAction) return;
         $('#teacherSlotModal').style.display='none';
         $('#appLoader').classList.remove('hidden');
+        let success = false;
+        let errorMessage = '';
         try {
+          let res;
           if(tsmTargetAction.action === 'close') {
-            await fetch(`${API_BASE}/api/teacher/slots`, { method:'POST', headers:getAuthHeaders(), body: JSON.stringify({ kind:'oneoff', startISO: tsmTargetAction.startISO, endISO: tsmTargetAction.endISO, isActive: false }) });
+            res = await fetch(`${API_BASE}/api/teacher/slots`, { method:'POST', headers:getAuthHeaders(), body: JSON.stringify({ kind:'oneoff', startISO: tsmTargetAction.startISO, endISO: tsmTargetAction.endISO, isActive: false }) });
+            const data = await safeJson(res);
+            if (!res.ok || !data.success) throw new Error(data.message || 'Failed to close slot');
+            success = true;
           } else if(tsmTargetAction.action === 'open') {
-            await fetch(`${API_BASE}/api/teacher/slots/${tsmTargetAction.slotId}`, { method:'DELETE', headers:getAuthHeaders() });
+            res = await fetch(`${API_BASE}/api/teacher/slots/${tsmTargetAction.slotId}`, { method:'DELETE', headers:getAuthHeaders() });
+            const data = await safeJson(res);
+            if (!res.ok || !data.success) throw new Error(data.message || 'Failed to open slot');
+            success = true;
           } else if (tsmTargetAction.action === 'toggle_recurring') {
             if(tsmTargetAction.slotId) {
-              if (tsmTargetAction.delete) await fetch(`${API_BASE}/api/teacher/slots/${tsmTargetAction.slotId}`, { method:'DELETE', headers:getAuthHeaders() });
-              else await fetch(`${API_BASE}/api/teacher/slots/${tsmTargetAction.slotId}/toggle`, { method:'PATCH', headers:getAuthHeaders() });
+              if (tsmTargetAction.delete) {
+                res = await fetch(`${API_BASE}/api/teacher/slots/${tsmTargetAction.slotId}`, { method:'DELETE', headers:getAuthHeaders() });
+              } else {
+                res = await fetch(`${API_BASE}/api/teacher/slots/${tsmTargetAction.slotId}/toggle`, { method:'PATCH', headers:getAuthHeaders() });
+              }
             } else {
-              await fetch(`${API_BASE}/api/teacher/slots`, { method:'POST', headers:getAuthHeaders(), body: JSON.stringify({ kind:'recurring', dow: tsmTargetAction.dow, startTime: tsmTargetAction.startTime, isActive: false }) });
+              res = await fetch(`${API_BASE}/api/teacher/slots`, { method:'POST', headers:getAuthHeaders(), body: JSON.stringify({ kind:'recurring', dow: tsmTargetAction.dow, startTime: tsmTargetAction.startTime, isActive: false }) });
             }
+            const data = await safeJson(res);
+            if (!res.ok || !data.success) throw new Error(data.message || 'Failed to modify recurring slot');
+            success = true;
           }
-          await fetchScheduleData();
-        } catch(e) { showToast('Action failed', 'bad'); }
+          if (success) {
+            showToast('Slot updated successfully', 'good');
+            await fetchScheduleData();
+          }
+        } catch(e) {
+          errorMessage = e.message;
+          showToast(errorMessage || 'Action failed', 'bad');
+        }
         $('#appLoader').classList.add('hidden');
       };
 
@@ -2242,7 +2265,7 @@
                 } else {
                   div.classList.add('slot-my');
                   div.innerHTML = `<i class="fas fa-user"></i> MY`;
-                  if (hoursUntil < 12) div.classList.add('slot-locked');
+                  if (hoursUntil < 8) div.classList.add('slot-locked');
                   if (hoursUntil > -2 && !isPast) div.onclick = () => openScheduleModal(lesson);
                 }
               } else if (globalLesson || offSlot || fixedSlot) {
@@ -2351,10 +2374,11 @@
                 div.textContent = recSlot.studentName;
                 div.onclick = () => handleTeacherFixedClick(wd, tLocal, recSlot, false); 
               } else {
-                const myName = AppState.profile ? `${AppState.profile.firstName||''} ${AppState.profile.lastName||''}`.trim() : '';
-                const childName = getExtras().childName || '';
+                // FIX 2: Use studentId for precise matching instead of name
+                const currentStudentId = window.currentUserId;
+                const isMySlot = recSlot.studentId && currentStudentId && recSlot.studentId === currentStudentId;
                 
-                if (recSlot.studentName === myName || recSlot.studentName === childName) {
+                if (isMySlot) {
                   div.classList.add('slot-fixed'); 
                   div.innerHTML = `<i class="fas fa-user"></i> MY`;
                   div.style.cursor = 'pointer';
@@ -2381,7 +2405,7 @@
                 div.innerHTML = '<i class="fas fa-plus" style="color:var(--primary); opacity: 0.5;"></i>';
                 div.onclick = () => handleTeacherFixedClick(wd, tLocal, recSlot, false);
               } else {
-                // STUDENT LOGIC - can interact with empty slots in Fixed Grid
+                // ЛОГИКА ДЛЯ СТУДЕНТОВ - могут взаимодействовать с пустыми слотами в Fixed Grid
                 const nextDate = getNextDateForWeekday(wd, tLocal);
                 const localDateStr = formatDate(nextDate);
                 const startISO = nextDate.toISOString();
@@ -2445,7 +2469,7 @@
         const now = Date.now();
         const lessonTime = booking.start ? booking.start.getTime() : (new Date(`${booking.dateStr}T${booking.timeStr}:00Z`).getTime());
         const diffHours = (lessonTime - now) / (1000 * 60 * 60);
-        const locked = diffHours < 12;
+        const locked = diffHours < 8;
         const past = lessonTime < now;
         lockWarn.style.display = locked ? 'block' : 'none';
 
@@ -2513,8 +2537,8 @@
         const now = Date.now();
         const targetUtcTime = Date.UTC(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate(), ...newTime.split(':').map(Number));
         const hoursUntil = (targetUtcTime - now) / 3600000;
-        if (hoursUntil < 12) {
-          showToast('Cannot move to a slot that starts in less than 12 hours.', 'warn');
+        if (hoursUntil < 8) {
+          showToast('Cannot move to a slot that starts in less than 8 hours.', 'warn');
           AppState.scheduleMoving = false;
           renderSchedule();
           return;
@@ -2733,35 +2757,6 @@
           }catch(e){ showToast('Network error','bad'); }
         });
 
-        // ================= SIGN UP HANDLER ADDED =================
-        $('#signupForm').addEventListener('submit', async (e)=>{
-          e.preventDefault();
-          const name = $('#regName').value.trim();
-          const email = $('#regEmail').value.trim();
-          const password = $('#regPassword').value.trim();
-          if(!name || !email || !password){ showToast('Please enter all fields', 'warn'); return; }
-          
-          const nameParts = name.split(' ');
-          const firstName = nameParts[0];
-          const lastName = nameParts.slice(1).join(' ');
-
-          $('#appLoader').classList.remove('hidden');
-          try{
-            const res = await fetch(`${API_BASE}/api/register`, {
-              method:'POST', headers:{'Content-Type':'application/json'},
-              body: JSON.stringify({ firstName, lastName, email, password })
-            });
-            const data = await safeJson(res);
-            if(res.ok && (data.success || data.token)){
-              showToast('Account created successfully! Please sign in.', 'good');
-              toggleSignup(); // Switches back to login view
-            }else{
-              showToast(data?.message || 'Registration failed', 'bad');
-            }
-          }catch(err){ showToast('Network error', 'bad'); }
-          $('#appLoader').classList.add('hidden');
-        });
-
         const settingsFill = ()=>{
           $('#inpFirstName').value = (AppState.profile?.firstName)||'';
           $('#inpLastName').value = (AppState.profile?.lastName)||'';
@@ -2820,7 +2815,7 @@
           }
         });
 
-        // === TEACHER LOGIC ===
+        // === ЛОГИКА ДЛЯ ПРЕПОДАВАТЕЛЯ ===
         window.currentUserRole = 'student'; 
 
        async function checkUserRoleAndSetupUI() {
@@ -2836,6 +2831,8 @@
 
             if (data.success && data.user) {
               window.currentUserRole = data.user.role;
+              // Store user ID for later use
+              window.currentUserId = data.user._id || data.user.id;
               
               if (window.currentUserRole === 'teacher') {
                 showLogin(false);
@@ -2846,7 +2843,7 @@
                 const navHome = document.getElementById('navHome');
                 if (navHome) navHome.setAttribute('data-nav', 'teacher-dashboard');
 
-                // Hide Level for teacher
+                // Прячем Level для учителя
                 const levelRow = document.getElementById('userLevelRow') || document.querySelector('.profile-card .level');
                 if(levelRow) levelRow.style.display = 'none';
                 
