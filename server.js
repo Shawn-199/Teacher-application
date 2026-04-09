@@ -1753,7 +1753,7 @@ app.get('/api/schedule', optionalAuth, async (req, res) => {
       if (s.kind !== 'oneoff') continue;
       
       // ИСПРАВЛЕНИЕ 3: Скрываем слоты, которые закрыты преподавателем ИЛИ уже закреплены в Fixed Grid
-      if (!s.isActive || s.studentId) continue; 
+      if (!s.isActive) continue; 
       
       addItem('slot', 'Available', s.startISO, s.endISO, { 
         teacherName: s.teacherName, teacherId: s.teacherId,

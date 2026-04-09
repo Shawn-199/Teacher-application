@@ -2139,26 +2139,51 @@
         const hoursUntil = (startUtcMs - Date.now()) / 3600000;
         if(hoursUntil < 12) { showToast('You cannot manage slots less than 12 hours in advance.', 'warn'); return; }
 
-        if(existingSlot && !existingSlot.isActive) {
-          $('#tsmText').textContent = 'Open this slot for students?';
-          tsmTargetAction = { action: 'open', slotId: existingSlot.slotId || existingSlot._id };
-        } else {
-          $('#tsmText').textContent = 'Close this slot so students cannot book it?';
-          tsmTargetAction = { action: 'close', startISO: startIsoStr, endISO: new Date(startUtcMs + 25*60000).toISOString() };
-        }
-        $('#teacherSlotModal').style.display='flex';
-      }
+if (existingSlot && existingSlot._id) {
+  $('#tsmText').textContent = existingSlot.isActive
+    ? 'Close this slot so students cannot book it?'
+    : 'Open this slot for students?';
+
+  tsmTargetAction = { 
+    action: 'toggle', 
+    slotId: existingSlot._id 
+  };
+
+} else {
+  if (!startIsoStr) {
+    showToast('Invalid slot time', 'bad');
+    return;
+  }
+
+  $('#tsmText').textContent = 'Close this slot so students cannot book it?';
+  
+  tsmTargetAction = {
+    action: 'create_off',
+    startISO: startIsoStr,
+    endISO: new Date(new Date(startIsoStr).getTime() + 25 * 60000).toISOString()
+  };
+}
+
+$('#teacherSlotModal').style.display = 'flex';
 
       function handleTeacherFixedClick(dow, startTime, existingRecSlot, toDelete) {
-        if(!existingRecSlot) {
-          $('#tsmText').textContent = `Close all future ${DAYS_SHORT[dow]} at ${startTime}?`;
-          tsmTargetAction = { action: 'toggle_recurring', dow, startTime };
-        } else {
-          $('#tsmText').textContent = toDelete ? `Remove OFF block (Open for booking)?` : `Close slot?`;
-          tsmTargetAction = { action: 'toggle_recurring', slotId: existingRecSlot.slotId || existingRecSlot._id, delete: toDelete };
-        }
-        $('#teacherSlotModal').style.display='flex';
-      }
+  if (!existingRecSlot) {
+    $('#tsmText').textContent = `Close all future ${DAYS_SHORT[dow]} at ${startTime}?`;
+    tsmTargetAction = { action: 'toggle_recurring', dow, startTime };
+  } else {
+    $('#tsmText').textContent = toDelete 
+      ? 'Remove OFF block (Open for booking)?' 
+      : 'Close slot?';
+
+    tsmTargetAction = { 
+      action: 'toggle_recurring', 
+      slotId: existingRecSlot._id, 
+      delete: toDelete 
+    };
+  }
+
+  $('#teacherSlotModal').style.display = 'flex';
+}
 
       function renderMyTab(container) {
         const isTeacher = window.currentUserRole === 'teacher';
