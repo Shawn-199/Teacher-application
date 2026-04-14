@@ -1,4 +1,4 @@
-// server.js — Admin API + CORS + статика admin-ui + teacher application + schedule + admin bookings create
+// server.js - Admin API + CORS + Static admin-ui + Teacher application + Schedule + Bookings
 const express = require('express');
 const multer = require('multer');
 const cors = require('cors');
@@ -71,7 +71,7 @@ async function normalizeToMp3(file, fallbackName) {
 const app = express();
 app.set('trust proxy', 1);
 
-// --- CORS (включая preflight) ---
+// --- CORS (including preflight) ---
 const corsOptions = {
   origin: (origin, cb) => cb(null, true),
   credentials: true,
@@ -82,7 +82,8 @@ const corsOptions = {
   maxAge: 86400
 };
 app.use(cors(corsOptions));
-// Универсальный handler для preflight
+
+// Universal preflight handler
 app.use((req, res, next) => {
   if (req.method === 'OPTIONS') {
     const origin = req.headers.origin;
@@ -103,7 +104,7 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Раздача админки как статики (public/admin.html -> /admin-ui/admin.html)
+// Serve admin UI as static
 app.use('/admin-ui', express.static('public', { extensions: ['html'], index: false }));
 
 /* ---------------- MongoDB ---------------- */
@@ -123,9 +124,7 @@ const UserSchema = new Schema({
   lastName: String,
   role: { type: String, default: 'student' }, // 'student' | 'teacher' | 'manager' | 'admin'
   isGuest: { type: Boolean, default: false },
-  // ВНЕДРЕНО: привязка конкретного препода к студенту
   assignedTeacher: { type: Schema.Types.ObjectId, ref: 'User' },
-  // ВНЕДРЕНО: для сброса пароля
   resetCode: { type: String }
 }, { timestamps: true });
 const User = model('User', UserSchema);
@@ -142,7 +141,7 @@ const BookingSchema = new Schema({
   dateStr: { type: String, required: true },
   timeStr: { type: String, required: true },
   level:   { type: String, required: true },
-  // ВНЕДРЕНО: статус по умолчанию теперь ожидает оплаты
+  isTrial: { type: Boolean, default: false }, // ADDED: identifies trial lessons
   status:  { type: String, default: 'PendingPayment' }, 
   teacherName: { type: String, default: process.env.TEACHER_NAME || 'Teacher' },
   teacherId: { type: Schema.Types.ObjectId, ref: 'User', index: true },
@@ -151,10 +150,10 @@ const BookingSchema = new Schema({
 }, { timestamps: true });
 const Booking = model('Booking', BookingSchema);
 
-// NEW: DeferredCredit model to track how many lessons a student has moved to a specific month
+// DeferredCredit model to track how many lessons a student has moved to a specific month
 const DeferredCreditSchema = new Schema({
   student: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-  month: { type: String, required: true }, // YYYY-MM, e.g. "2025-04"
+  month: { type: String, required: true }, // YYYY-MM, e.g. "2026-04"
   count: { type: Number, default: 0, min: 0, max: 2 } // max 2 per month
 }, { timestamps: true });
 // Unique index ensures one record per student per month
@@ -177,7 +176,7 @@ try { TimeSlot = mongoose.model('TimeSlot'); } catch (e) {
     endISO: Date,
     teacherName: { type: String, default: process.env.TEACHER_NAME || 'Teacher' },
     teacherId: { type: Schema.Types.ObjectId, ref: 'User', index: true },
-    // НОВЫЕ ПОЛЯ ДЛЯ FIXED GRID:
+    // NEW FIELDS FOR FIXED GRID:
     studentId: { type: Schema.Types.ObjectId, ref: 'User', index: true },
     studentName: String,
     note: String,
@@ -190,7 +189,7 @@ try { TimeSlot = mongoose.model('TimeSlot'); } catch (e) {
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || 'smtp-relay.brevo.com',
   port: process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT) : 2525,
-  secure: false, // порт 2525 не требует SSL
+  secure: false, 
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS
@@ -204,35 +203,34 @@ const transporter = nodemailer.createTransport({
   family: 4
 });
 
-// Проверка соединения при запуске
+// Check connection on startup
 transporter.verify((error, success) => {
   if (error) {
-    console.error('❌ Brevo SMTP connection failed:', error.message);
+    console.error('SMTP connection failed:', error.message);
   } else {
-    console.log('✅ Brevo SMTP server is ready on port 2525');
+    console.log('SMTP server is ready on port 2525');
   }
 });
 
 const ADMIN_TO = process.env.ADMIN_BOOKINGS_TO || process.env.NOTIFY_TO || process.env.EMAIL_USER;
-
 const FROM_EMAIL = process.env.BREVO_FROM || process.env.EMAIL_USER;
 const REPLY_TO   = process.env.REPLY_TO   || process.env.NOTIFY_TO || process.env.EMAIL_USER;
 
 async function sendEmail(opts) {
   try {
     if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-      console.error('Email credentials missing: EMAIL_USER and EMAIL_PASS required');
+      console.error('Email credentials missing');
       return false;
     }
     const result = await transporter.sendMail({
-      from: `"Grand English Courses" <${FROM_EMAIL}>`,  // ✅ подтверждённый отправитель
-      replyTo: REPLY_TO,                                 // ✅ ответы придут на Gmail
+      from: `"Grand English Courses" <${FROM_EMAIL}>`, 
+      replyTo: REPLY_TO,                                 
       ...opts
     });
-    console.log('📧 Email sent successfully to:', opts.to);
+    console.log('Email sent successfully to:', opts.to);
     return true;
   } catch (e) {
-    console.error('❌ Email send failed:', e.message);
+    console.error('Email send failed:', e.message);
     return false;
   }
 }
@@ -243,7 +241,7 @@ function signToken(user) {
   return jwt.sign(
     { 
       uid: user._id, 
-      id: user._id, // Добавили это для совместимости с фронтендом
+      id: user._id, 
       email: user.email, 
       role: user.role 
     },
@@ -251,11 +249,12 @@ function signToken(user) {
     { expiresIn: '30d' }
   );
 }
+
 function auth(req, res, next) {
   try {
     const h = req.headers.authorization || '';
     if (!h.startsWith('Bearer ')) {
-      return res.status(401).json({ success:false, code:'MISSING_TOKEN', message:'Missing Authorization: Bearer <token>' });
+      return res.status(401).json({ success:false, code:'MISSING_TOKEN', message:'Missing Authorization header' });
     }
     const theToken = h.slice(7).trim();
     if (!theToken) {
@@ -265,9 +264,10 @@ function auth(req, res, next) {
     req.user = payload;
     next();
   } catch (e) {
-    return res.status(401).json({ success:false, code:'INVALID_TOKEN', message:'Invalid or expired auth token' });
+    return res.status(401).json({ success:false, code:'INVALID_TOKEN', message:'Invalid or expired token' });
   }
 }
+
 function optionalAuth(req, res, next) {
   try {
     const h = req.headers.authorization || '';
@@ -279,7 +279,7 @@ function optionalAuth(req, res, next) {
   next();
 }
 
-/* -------- Admin guard (для /api/admin/*) -------- */
+/* -------- Admin guard -------- */
 const ADMIN_PAGE_SIZE_DEFAULT = 25;
 const LESSON_STATUSES = ['PendingPayment','Scheduled','Completed','Cancelled','No-Show','Rescheduled'];
 
@@ -291,12 +291,10 @@ async function requireAdmin(req, res, next) {
     const u = await User.findById(payload.uid).select('_id email role');
     if (!u) return res.status(401).json({ success:false, message:'User not found' });
     
-    // БЕЗОГОВОРОЧНЫЙ ДОСТУП ДЛЯ ТВОЕЙ ПОЧТЫ
     if (u.email === 'shakhrom.azimov99@gmail.com' || ['admin','manager'].includes(u.role)) {
       req.admin = { id: u._id, email: u.email, role: 'admin' };
       return next();
     }
-
     return res.status(403).json({ success:false, message:'Admin or manager only' });
   } catch (e) {
     return res.status(401).json({ success:false, message:'Invalid token' });
@@ -311,26 +309,17 @@ async function requireTeacher(req, res, next) {
         return res.status(401).json({ success: false, message: 'Missing token' });
     }
     
-    // Расшифровываем токен
     const payload = jwt.verify(h.slice(7), process.env.JWT_SECRET);
     const u = await User.findById(payload.uid).select('_id email role');
     if (!u) {
         return res.status(401).json({ success: false, message: 'User not found' });
     }
 
-    // Пропускаем, если это твоя почта (владелец), ИЛИ если роль = admin, ИЛИ если роль = teacher
-    if (
-      u.email === 'shakhrom.azimov99@gmail.com' || 
-      ['admin', 'teacher', 'manager'].includes(u.role)
-    ) {
-      // Сохраняем данные пользователя в объекте запроса для дальнейшего использования
+    if (u.email === 'shakhrom.azimov99@gmail.com' || ['admin', 'teacher', 'manager'].includes(u.role)) {
       req.user = { id: u._id, email: u.email, role: u.role, uid: u._id }; 
-      return next(); // Доступ разрешен, идем дальше
+      return next(); 
     }
-
-    // Если ничего из вышеперечисленного не совпало — блокируем доступ
     return res.status(403).json({ success: false, message: 'Teacher access required' });
-    
   } catch (e) {
     return res.status(401).json({ success: false, message: 'Invalid token' });
   }
@@ -340,7 +329,6 @@ async function requireTeacher(req, res, next) {
 app.get('/health', (req, res) => res.json({ ok: true }));
 
 /* ---------------- Teachers form (audio) ---------------- */
-// Configure multer with disk storage to avoid memory exhaustion
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const tmpDir = path.join('/tmp', 'uploads-' + Date.now());
@@ -354,24 +342,19 @@ const storage = multer.diskStorage({
 });
 const upload = multer({
   storage: storage,
-  limits: { fileSize: 25 * 1024 * 1024 } // 25MB per file
+  limits: { fileSize: 25 * 1024 * 1024 }
 }).any();
 
 app.post('/submit', (req, res) => {
   upload(req, res, async (err) => {
-    if (err) {
-      return res.status(400).json({ success: false, message: err.message });
-    }
+    if (err) return res.status(400).json({ success: false, message: err.message });
 
     const tmpDir = req.files && req.files.length > 0 ? path.dirname(req.files[0].path) : null;
     try {
-      // Check email configuration first
       if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-        console.error('Email configuration missing - cannot send teacher application');
         return res.status(500).json({ success:false, message:'Email service not configured' });
       }
 
-      // Convert files from disk to buffers for processing
       const filePromises = (req.files || []).map(async (f) => {
         const buffer = await fs.promises.readFile(f.path);
         return {
@@ -386,18 +369,13 @@ app.post('/submit', (req, res) => {
       const files = {};
       for (const f of fileObjs) files[f.fieldname] = f;
 
-      console.log('FILES:', fileObjs.map(f => ({ field: f.fieldname, name: f.originalname, size: f.size, type: f.mimetype })));
       const fQ1 = files['audioQ1'] || null;
       const fQ2 = files['audioQ2'] || null;
       const fMain = files['audio'] || null;
       const fCV = files['cv'] || files['resume'] || files['cvFile'] || null;
 
-      if (!fCV) {
-        return res.status(400).json({ success: false, message: 'Missing required file: CV' });
-      }
-      if (!fQ1 && !fQ2 && !fMain) {
-        return res.status(400).json({ success: false, message: 'Missing audio file (audio, audioQ1 or audioQ2)' });
-      }
+      if (!fCV) return res.status(400).json({ success: false, message: 'Missing required file: CV' });
+      if (!fQ1 && !fQ2 && !fMain) return res.status(400).json({ success: false, message: 'Missing audio file' });
 
       const {
         email='-', fullname='-', age='-', country='-', languages='',
@@ -405,12 +383,10 @@ app.post('/submit', (req, res) => {
       } = req.body;
 
       const parsedLanguages = languages ? String(languages).split(',').map(l=>l.trim()) : [];
-
       const a1 = await normalizeToMp3(fQ1, 'speaking-q1.webm');
       const a2 = await normalizeToMp3(fQ2, 'speaking-q2.webm');
       const aMain = await normalizeToMp3(fMain, 'speaking-assessment.webm');
 
-      // Collect attachments: CV + audio (deduplicated)
       const attachments = [];
       function pushUnique(att) {
         if (!att || !att.content) return;
@@ -424,48 +400,37 @@ app.post('/submit', (req, res) => {
             attachments.push(att);
           }
         } catch (e) {
-          // Fallback: still push if hashing fails
           attachments.push(att);
         }
       }
 
-      // CV
-      if (fCV) {
-        pushUnique({
-          filename: fCV.originalname || 'CV',
-          content:  fCV.buffer,
-          contentType: fCV.mimetype || 'application/octet-stream'
-        });
-      }
-
-      // Audio (only if present & unique)
-      if (a1)    pushUnique(a1);
-      if (a2)    pushUnique(a2);
+      if (fCV) pushUnique({ filename: fCV.originalname || 'CV', content: fCV.buffer, contentType: fCV.mimetype || 'application/octet-stream' });
+      if (a1) pushUnique(a1);
+      if (a2) pushUnique(a2);
       if (aMain) pushUnique(aMain);
 
       await sendEmail({
         to: ADMIN_TO,
-        subject: `🎓 Новая заявка от ${fullname}`,
+        subject: `New application from ${fullname}`,
         html: `
-          <h2>Новая заявка</h2>
+          <h2>New Teacher Application</h2>
           <p><strong>Email:</strong> ${email}</p>
-          <p><strong>Имя:</strong> ${fullname}</p>
-          <p><strong>Страна:</strong> ${country}</p>
-          <p><strong>Возраст:</strong> ${age}</p>
-          <p><strong>Часовой пояс:</strong> ${timezone}</p>
-          <p><strong>Языки:</strong> ${parsedLanguages.join(', ')}</p>
-          <p><strong>Опыт:</strong> ${experience}</p>
-          <p><strong>Тест:</strong> ${quizScore}/20 (${quizPercentage}%)</p>
+          <p><strong>Name:</strong> ${fullname}</p>
+          <p><strong>Country:</strong> ${country}</p>
+          <p><strong>Age:</strong> ${age}</p>
+          <p><strong>Timezone:</strong> ${timezone}</p>
+          <p><strong>Languages:</strong> ${parsedLanguages.join(', ')}</p>
+          <p><strong>Experience:</strong> ${experience}</p>
+          <p><strong>Test Score:</strong> ${quizScore}/20 (${quizPercentage}%)</p>
         `,
         attachments
       });
 
-      res.status(201).json({ success:true, message:'Application submitted and email sent' });
+      res.status(201).json({ success:true, message:'Application submitted successfully' });
     } catch (err) {
       console.error('Error submitting application:', err);
       res.status(500).json({ success:false, message:'Internal server error', error: err.message });
     } finally {
-      // Cleanup temporary directory
       if (tmpDir && tmpDir.startsWith('/tmp')) {
         fs.rm(tmpDir, { recursive: true, force: true }, () => {});
       }
@@ -474,8 +439,6 @@ app.post('/submit', (req, res) => {
 });
 
 /* ---------------- Auth APIs ---------------- */
-
-// --- Восстановление пароля ---
 app.post('/api/forgot-password/send-code', async (req, res) => {
   try {
     const { email } = req.body;
@@ -529,7 +492,6 @@ app.post('/api/register', async (req, res) => {
     const token = signToken(user);
     res.json({ success:true, token, user:{ id:user._id, email:user.email, firstName, lastName, role:user.role } });
   } catch (e) {
-    console.error('Register error:', e);
     res.status(500).json({ success:false, message:'Registration failed' });
   }
 });
@@ -537,7 +499,7 @@ app.post('/api/register', async (req, res) => {
 app.post('/api/login', async (req, res) => {
   try {
     const { email, password } = req.body || {};
-    if(!email || !password) return res.status(400).json({ success:false, message:'email and password required' });
+    if(!email || !password) return res.status(400).json({ success:false, message:'Email and password required' });
     const user = await User.findOne({ email:(email||'').toLowerCase() });
     if (!user) return res.status(401).json({ success:false, message:'Invalid credentials' });
     const ok = await bcrypt.compare(password, user.passwordHash);
@@ -545,7 +507,6 @@ app.post('/api/login', async (req, res) => {
     const token = signToken(user);
     res.json({ success:true, token, user:{ id:user._id, email:user.email, firstName:user.firstName, lastName:user.lastName, role:user.role } });
   } catch (e) {
-    console.error('Login error:', e);
     res.status(500).json({ success:false, message:'Login failed' });
   }
 });
@@ -557,12 +518,10 @@ app.get('/api/me', optionalAuth, async (req, res) => {
 });
 
 /* ---------------- Bookings (student) ---------------- */
-
-// ИСПРАВЛЕНИЕ: Добавлен teacherId для фильтрации по конкретному преподавателю
 async function isSlotBooked(start, duration = 25, excludeId = null, studentId = null, teacherId = null) {
   const end = new Date(start.getTime() + duration * 60 * 1000);
   
-  // 1. Проверяем Booking (уже забронированные уроки)
+  // 1. Check existing Bookings
   const query = {
     status: { $in: ['Scheduled', 'Rescheduled', 'PendingPayment'] }, 
     $or: [
@@ -570,12 +529,12 @@ async function isSlotBooked(start, duration = 25, excludeId = null, studentId = 
     ]
   };
   if (excludeId) query._id = { $ne: excludeId };
-  if (teacherId) query.teacherId = teacherId; // Фильтруем по преподавателю
+  if (teacherId) query.teacherId = teacherId;
   
   const existingBooking = await Booking.findOne(query);
   if (existingBooking) return true;
 
-  // 2. Проверяем TimeSlot (закрытые учителем слоты или Fixed слоты других студентов)
+  // 2. Check TimeSlots
   const dow = start.getUTCDay();
   const timeStr = start.toISOString().split('T')[1].substring(0,5);
   
@@ -585,36 +544,30 @@ async function isSlotBooked(start, duration = 25, excludeId = null, studentId = 
       { kind: 'recurring', dow: dow, startTime: timeStr }
     ]
   };
-  if (teacherId) slotQuery.teacherId = teacherId; // Фильтруем по преподавателю
+  if (teacherId) slotQuery.teacherId = teacherId;
 
   const blockingSlots = await TimeSlot.find(slotQuery);
 
   for (const slot of blockingSlots) {
-     // Слот явно закрыт учителем (OFF блок)
+     // Explicitly closed by teacher
      if (slot.isActive === false) return true;
-     
-     // Слот закреплен за другим учеником
+     // Assigned to another student
      if (slot.studentId && studentId && slot.studentId.toString() !== studentId.toString()) {
         return true;
      }
   }
-
   return false;
 }
 
-// Helper to get next month key (YYYY-MM)
 function getNextMonthKey(fromDate = new Date()) {
   const d = new Date(fromDate);
   d.setMonth(d.getMonth() + 1);
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
 }
-
-// Helper to get month key from date
 function getMonthKey(date) {
   return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}`;
 }
 
-// GET /api/student/deferred?month=YYYY-MM (default next month)
 app.get('/api/student/deferred', auth, async (req, res) => {
   try {
     const { month } = req.query;
@@ -622,49 +575,35 @@ app.get('/api/student/deferred', auth, async (req, res) => {
     let deferred = await DeferredCredit.findOne({ student: req.user.uid, month: targetMonth });
     res.json({ success: true, count: deferred ? deferred.count : 0, month: targetMonth });
   } catch (e) {
-    console.error('Error fetching deferred count:', e);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
 
-// POST /api/bookings/:id/move-to-next-month
 app.post('/api/bookings/:id/move-to-next-month', auth, async (req, res) => {
   try {
     const { id } = req.params;
-    if (!mongoose.isValidObjectId(id)) {
-      return res.status(400).json({ success: false, message: 'Invalid booking ID' });
-    }
+    if (!mongoose.isValidObjectId(id)) return res.status(400).json({ success: false, message: 'Invalid booking ID' });
 
     const booking = await Booking.findOne({ _id: id, user: req.user.uid }).populate('teacherId');
-    if (!booking) {
-      return res.status(404).json({ success: false, message: 'Booking not found' });
-    }
+    if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
 
-    // Ensure it's upcoming and more than 8 hours away
     const now = Date.now();
     const lessonTime = booking.start.getTime();
     const hoursUntil = (lessonTime - now) / (1000 * 60 * 60);
     
-    if (hoursUntil < 8) {
-      return res.status(400).json({ success: false, message: 'Cannot move a lesson that starts in less than 8 hours' });
-    }
+    if (hoursUntil < 8) return res.status(400).json({ success: false, message: 'Cannot move a lesson that starts in less than 8 hours' });
     if (booking.status !== 'Scheduled' && booking.status !== 'Rescheduled') {
       return res.status(400).json({ success: false, message: 'Only scheduled lessons can be moved' });
     }
 
     const nextMonth = getNextMonthKey(); 
-    // Check limit
     let deferred = await DeferredCredit.findOne({ student: req.user.uid, month: nextMonth });
     const currentCount = deferred ? deferred.count : 0;
-    if (currentCount >= 2) {
-      return res.status(400).json({ success: false, message: 'Maximum 2 lessons can be moved to next month' });
-    }
+    if (currentCount >= 2) return res.status(400).json({ success: false, message: 'Maximum 2 lessons can be moved to next month' });
 
-    // Cancel the current booking (free up slot)
     booking.status = 'Cancelled';
     await booking.save();
 
-    // Increment deferred count
     if (!deferred) {
       deferred = new DeferredCredit({ student: req.user.uid, month: nextMonth, count: 1 });
     } else {
@@ -672,7 +611,6 @@ app.post('/api/bookings/:id/move-to-next-month', auth, async (req, res) => {
     }
     await deferred.save();
 
-    // Send notifications to Admin
     await sendEmail({
       to: ADMIN_TO,
       subject: `📅 Lesson moved to next month: ${booking.childName}`,
@@ -685,7 +623,6 @@ app.post('/api/bookings/:id/move-to-next-month', auth, async (req, res) => {
       `
     });
 
-    // Send notification to Student
     await sendEmail({
       to: booking.email,
       subject: 'Your lesson has been moved to next month',
@@ -694,51 +631,48 @@ app.post('/api/bookings/:id/move-to-next-month', auth, async (req, res) => {
         <p>Dear ${booking.parentName},</p>
         <p>The lesson for <strong>${booking.childName}</strong> originally scheduled for ${booking.dateStr} at ${booking.timeStr} has been moved to next month (${nextMonth}).</p>
         <p>You can now book a new lesson in ${nextMonth} using your deferred credit. You have <strong>${deferred.count}/2</strong> deferred lessons for next month.</p>
-        <p>Please log in to your dashboard to schedule your deferred lesson.</p>
       `
     });
 
-    // Уведомление Преподавателю
     if (booking.teacherId && booking.teacherId.email) {
       await sendEmail({
         to: booking.teacherId.email,
-        subject: `Отмена урока (Перенос): ${booking.childName} (${booking.dateStr})`,
+        subject: `Lesson Cancelled (Deferred): ${booking.childName} (${booking.dateStr})`,
         html: `
-          <h3>Урок отменен студентом (перенесен на следующий месяц)</h3>
-          <p>Ученик: <b>${booking.childName}</b></p>
-          <p>Освободившаяся дата: ${booking.dateStr} в ${booking.timeStr}</p>
-          <p>Так как студент отменил урок заранее (более чем за 8 часов), этот урок <b>не оплачивается</b>. Ваш слот снова свободен в расписании.</p>
+          <h3>Lesson deferred by student</h3>
+          <p>Student: <b>${booking.childName}</b></p>
+          <p>Freed date: ${booking.dateStr} at ${booking.timeStr}</p>
+          <p>This slot is now available in your schedule.</p>
         `
       });
     }
 
     res.json({ success: true, deferredCount: deferred.count });
   } catch (e) {
-    console.error('Move to next month error:', e);
     res.status(500).json({ success: false, message: 'Failed to move lesson' });
   }
 });
 
-// TRIAL booking – now accepts startISO
+// TRIAL booking - Smart Endpoint (Handles New & Reschedule)
 app.post('/api/bookings/trial', optionalAuth, async (req, res) => {
   try {
-    const { startISO, level, phone, childName, parentName, childAge, country, timeZone } = req.body || {};
+    const { startISO, level, phone, childName, parentName, childAge, country, timeZone, date, time } = req.body || {};
+    
     if (!startISO) return res.status(400).json({ success:false, message:'startISO is required' });
 
     const start = new Date(startISO);
     if (isNaN(start)) return res.status(400).json({ success:false, message:'Invalid startISO' });
-    const end = new Date(start.getTime() + 25 * 60 * 1000); // 25 minutes
+    const end = new Date(start.getTime() + 25 * 60 * 1000); 
 
-    // Extract dateStr and timeStr from start for legacy fields
-    const dateStr = start.toISOString().split('T')[0];
-    const timeStr = start.toISOString().split('T')[1].substring(0,5); // "HH:MM"
+    // FIX TIMEZONE ISSUE: Use exact strings from frontend/bot if available
+    const dateStr = date || start.toISOString().split('T')[0];
+    const timeStr = time || start.toISOString().split('T')[1].substring(0,5);
 
     let userDoc = null;
     if (req.user && req.user.uid) {
       userDoc = await User.findById(req.user.uid);
       if (!userDoc) return res.status(401).json({ success:false, message:'Auth user not found' });
     } else {
-      // guest
       const candidates = [
         req.body.email, req.body.userEmail, req.body.contactEmail,
         req.body.login, req.body.username, req.headers['x-user-email']
@@ -751,7 +685,59 @@ app.post('/api/bookings/trial', optionalAuth, async (req, res) => {
       });
     }
 
-    // ИСПРАВЛЕНИЕ: Передача null в качестве teacherId для триал урока (учитель назначается позже)
+    // CHECK IF ACTIVE TRIAL ALREADY EXISTS
+    const existingTrial = await Booking.findOne({
+      user: userDoc._id,
+      isTrial: true,
+      status: { $in: ['Scheduled', 'Rescheduled', 'PendingPayment'] }
+    });
+
+    if (existingTrial) {
+      // RESCHEDULE EXISTING TRIAL
+      if (await isSlotBooked(start, 25, existingTrial._id, userDoc._id, null)) {
+        return res.status(409).json({ success:false, message:'This time slot is already booked' });
+      }
+
+      const oldDate = existingTrial.dateStr;
+      const oldTime = existingTrial.timeStr;
+
+      existingTrial.dateStr = dateStr;
+      existingTrial.timeStr = timeStr;
+      existingTrial.start = start;
+      existingTrial.end = end;
+      existingTrial.status = 'Rescheduled';
+      await existingTrial.save();
+
+      await sendEmail({
+        to: ADMIN_TO,
+        subject: `🔄 Trial Rescheduled: ${existingTrial.childName} (${dateStr} ${timeStr})`,
+        html: `
+          <h2>Trial Lesson Rescheduled</h2>
+          <p><strong>Student:</strong> ${existingTrial.childName} (${existingTrial.parentName})</p>
+          <p><strong>New Time:</strong> ${dateStr} at ${timeStr}</p>
+          <p><strong>Previous Time:</strong> ${oldDate} at ${oldTime}</p>
+        `
+      });
+
+      if (existingTrial.email && !existingTrial.email.includes('guest.local')) {
+        await sendEmail({
+          to: existingTrial.email,
+          subject: `🔄 Trial Lesson Rescheduled - ${dateStr} at ${timeStr}`,
+          html: `
+            <h2>Trial Lesson Rescheduled</h2>
+            <p>Dear ${existingTrial.parentName},</p>
+            <p>Your trial lesson for <strong>${existingTrial.childName}</strong> has been updated.</p>
+            <p><strong>New Date:</strong> ${dateStr}</p>
+            <p><strong>New Time:</strong> ${timeStr} (${timeZone || ''})</p>
+            <p>We look forward to seeing you!</p>
+          `
+        });
+      }
+
+      return res.json({ success:true, booking: existingTrial, isRescheduled: true });
+    }
+
+    // CREATE NEW TRIAL
     if (await isSlotBooked(start, 25, null, userDoc._id, null)) {
       return res.status(409).json({ success:false, message:'This time slot is already booked' });
     }
@@ -769,13 +755,12 @@ app.post('/api/bookings/trial', optionalAuth, async (req, res) => {
       timeStr,
       level: level || 'Beginner',
       status: 'Scheduled',
+      isTrial: true,
       teacherName: process.env.TEACHER_NAME || 'Teacher',
-      // teacherId can be set later by admin, default null
       start,
       end
     });
 
-    // --- send emails (unchanged) ---
     await sendEmail({
       to: ADMIN_TO,
       subject: `🗓️ New trial booking: ${booking.childName} (${dateStr} ${timeStr})`,
@@ -785,10 +770,7 @@ app.post('/api/bookings/trial', optionalAuth, async (req, res) => {
         <p><strong>Child:</strong> ${booking.childName} (${booking.childAge || '-'} y.o.)</p>
         <p><strong>Phone:</strong> ${booking.phone}</p>
         <p><strong>Email:</strong> ${booking.email}</p>
-        <p><strong>Level:</strong> ${booking.level}</p>
         <p><strong>Date & Time:</strong> ${dateStr} ${timeStr}</p>
-        <p><strong>Country:</strong> ${booking.country || '-'}</p>
-        <p><strong>Timezone:</strong> ${booking.timeZone || '-'}</p>
       `
     });
 
@@ -802,9 +784,7 @@ app.post('/api/bookings/trial', optionalAuth, async (req, res) => {
           <p>Your trial lesson for <strong>${booking.childName}</strong> has been scheduled.</p>
           <p><strong>Date:</strong> ${dateStr}</p>
           <p><strong>Time:</strong> ${timeStr} (${booking.timeZone||''})</p>
-          <p><strong>Level:</strong> ${level}</p>
-          <p><strong>Teacher:</strong> ${process.env.TEACHER_NAME || 'To be assigned'}</p>
-          <p>We look forward to seeing you! </p>
+          <p>We look forward to seeing you!</p>
         `
       });
     }
@@ -819,26 +799,25 @@ app.post('/api/bookings/trial', optionalAuth, async (req, res) => {
 // Regular booking endpoint (for schedule lessons)
 app.post('/api/book', auth, async (req, res) => {
   try {
-    const { email, childName, parentName, childAge, country, timeZone, level, phone, startISO, useDeferred } = req.body;
+    const { email, childName, parentName, childAge, country, timeZone, level, phone, startISO, useDeferred, date, time } = req.body;
     if (!startISO || !childName || !parentName || !email || !level) {
-      return res.status(400).json({ success:false, message:'Missing required fields (startISO, childName, parentName, email, level)' });
+      return res.status(400).json({ success:false, message:'Missing required fields' });
     }
 
     const start = new Date(startISO);
     if (isNaN(start)) return res.status(400).json({ success:false, message:'Invalid startISO' });
-    const end = new Date(start.getTime() + 25 * 60 * 1000); // 25 minutes
-    const dateStr = start.toISOString().split('T')[0];
-    const timeStr = start.toISOString().split('T')[1].substring(0,5);
+    const end = new Date(start.getTime() + 25 * 60 * 1000); 
+
+    const dateStr = date || start.toISOString().split('T')[0];
+    const timeStr = time || start.toISOString().split('T')[1].substring(0,5);
 
     const studentUser = await User.findById(req.user.uid);
     const assignedTeacherId = studentUser ? studentUser.assignedTeacher : null;
 
-    // ИСПРАВЛЕНИЕ: Передача assignedTeacherId для проверки конфликтов именно у этого учителя
     if (await isSlotBooked(start, 25, null, req.user.uid, assignedTeacherId)) {
       return res.status(409).json({ success:false, message:'This time slot is already booked' });
     }
 
-    // Handle deferred credit if requested
     const monthKey = getMonthKey(start);
     let deferredUsed = false;
     if (useDeferred) {
@@ -848,7 +827,7 @@ app.post('/api/book', auth, async (req, res) => {
         await deferred.save();
         deferredUsed = true;
       } else {
-        return res.status(400).json({ success: false, message: 'No deferred credits available for this month' });
+        return res.status(400).json({ success: false, message: 'No deferred credits available' });
       }
     }
 
@@ -863,7 +842,6 @@ app.post('/api/book', auth, async (req, res) => {
       start, end
     });
 
-    // Send to admin
     await sendEmail({
       to: ADMIN_TO,
       subject: `🗓️ New lesson booking: ${childName} (${dateStr} ${timeStr})${deferredUsed ? ' [Deferred credit used]' : ''}`,
@@ -880,7 +858,6 @@ app.post('/api/book', auth, async (req, res) => {
       `
     });
 
-    // Send confirmation to student
     await sendEmail({
       to: email,
       subject: `Your Lesson Confirmation - ${dateStr} at ${timeStr}`,
@@ -892,7 +869,7 @@ app.post('/api/book', auth, async (req, res) => {
         <p><strong>Time:</strong> ${timeStr} (${timeZone||''})</p>
         <p><strong>Level:</strong> ${level}</p>
         <p><strong>Teacher:</strong> ${process.env.TEACHER_NAME || 'Teacher'}</p>
-        ${deferredUsed ? '<p><strong>Note:</strong> This booking used a deferred credit from a previous month.</p>' : ''}
+        ${deferredUsed ? '<p><strong>Note:</strong> This booking used a deferred credit.</p>' : ''}
         <p>We look forward to seeing you!</p>
       `
     });
@@ -904,7 +881,7 @@ app.post('/api/book', auth, async (req, res) => {
   }
 });
 
-// ==== BULK BOOKING ENDPOINT (ИСПРАВЛЕН: Поддержка Fixed Grid + Обычное бронирование) ====
+// BULK BOOKING ENDPOINT
 app.post('/api/book/bulk', auth, async (req, res) => {
   try {
     const { slots, email, childName, parentName, childAge, country, timeZone, level, phone, isFixed } = req.body;
@@ -917,35 +894,31 @@ app.post('/api/book/bulk', auth, async (req, res) => {
     const assignedTeacherId = studentUser ? studentUser.assignedTeacher : null;
 
     if (isFixed) {
-        // Создаем бронирования на месяц (4 недели вперед) и закрепляем в Fixed Grid
         for (const slot of slots) {
             const start = new Date(slot.startISO);
             if (isNaN(start)) continue;
 
-            // ИСПРАВЛЕНИЕ: добавление teacherId в фильтр findOneAndUpdate
             await TimeSlot.findOneAndUpdate(
                 { 
                     kind: 'recurring', 
                     dow: start.getUTCDay(), 
                     startTime: start.toISOString().split('T')[1].substring(0,5),
-                    teacherId: assignedTeacherId // <--- ДОБАВЛЕНО В ФИЛЬТР
+                    teacherId: assignedTeacherId 
                 },
                 { 
                     studentId: req.user.uid, 
                     studentName: childName || 'Student', 
                     isActive: true, 
-                    teacherId: assignedTeacherId, // <--- КРИТИЧНОЕ ИСПРАВЛЕНИЕ
+                    teacherId: assignedTeacherId, 
                     teacherName: process.env.TEACHER_NAME || 'Teacher' 
                 },
                 { upsert: true, new: true }
             );
 
-            // 2. Генерируем Booking(и) на этот месяц (4 урока)
             for (let i = 0; i < 4; i++) {
                 const bStart = new Date(start.getTime() + i * 7 * 24 * 60 * 60 * 1000);
                 const bEnd = new Date(bStart.getTime() + 25 * 60 * 1000);
 
-                // ИСПРАВЛЕНИЕ: Вызов проверки с teacherId
                 if (await isSlotBooked(bStart, 25, null, req.user.uid, assignedTeacherId)) continue;
 
                 const booking = await Booking.create({
@@ -955,7 +928,7 @@ app.post('/api/book/bulk', auth, async (req, res) => {
                     timeStr: bStart.toISOString().split('T')[1].substring(0,5),
                     level,
                     status: 'PendingPayment',
-                    teacherId: assignedTeacherId, // <--- КРИТИЧНОЕ ИСПРАВЛЕНИЕ
+                    teacherId: assignedTeacherId, 
                     teacherName: process.env.TEACHER_NAME || 'Teacher',
                     start: bStart, end: bEnd
                 });
@@ -963,12 +936,10 @@ app.post('/api/book/bulk', auth, async (req, res) => {
             }
         }
     } else {
-        // Обычные одиночные бронирования
         for (const slot of slots) {
           const start = new Date(slot.startISO);
           if (isNaN(start)) continue;
           
-          // ИСПРАВЛЕНИЕ: Вызов проверки с teacherId
           if (await isSlotBooked(start, 25, null, req.user.uid, assignedTeacherId)) continue; 
           
           const dateStr = start.toISOString().split('T')[0];
@@ -978,7 +949,7 @@ app.post('/api/book/bulk', auth, async (req, res) => {
           const booking = await Booking.create({
             user: req.user.uid, email, childName, parentName, childAge, country, timeZone,
             phone: phone || '', dateStr, timeStr, level, status: 'PendingPayment',
-            teacherId: assignedTeacherId, // <--- КРИТИЧНОЕ ИСПРАВЛЕНИЕ
+            teacherId: assignedTeacherId, 
             teacherName: process.env.TEACHER_NAME || 'Teacher', start, end
           });
           createdBookings.push(booking);
@@ -992,14 +963,14 @@ app.post('/api/book/bulk', auth, async (req, res) => {
     const slotsHtml = createdBookings.map(b => `<li>${b.dateStr} at ${b.timeStr}</li>`).join('');
     await sendEmail({
       to: ADMIN_TO,
-      subject: `🗓️ Массовое бронирование уроков: ${childName} (${createdBookings.length} уроков)`,
+      subject: `🗓️ Bulk lesson booking: ${childName} (${createdBookings.length} lessons)`,
       html: `
-        <h2>Новое массовое бронирование</h2>
-        <p><strong>Ученик:</strong> ${childName}</p>
-        <p><strong>Родитель:</strong> ${parentName}</p>
-        <p><strong>Почта:</strong> ${email}</p>
-        <p><strong>Всего уроков:</strong> ${createdBookings.length}</p>
-        <p><strong>Тип:</strong> ${isFixed ? 'Fixed Slots (4 Weeks)' : 'One-off'}</p>
+        <h2>New bulk booking</h2>
+        <p><strong>Student:</strong> ${childName}</p>
+        <p><strong>Parent:</strong> ${parentName}</p>
+        <p><strong>Email:</strong> ${email}</p>
+        <p><strong>Total lessons:</strong> ${createdBookings.length}</p>
+        <p><strong>Type:</strong> ${isFixed ? 'Fixed Slots (4 Weeks)' : 'One-off'}</p>
         <ul>${slotsHtml}</ul>
       `
     });
@@ -1016,7 +987,6 @@ app.get('/api/my-bookings', auth, async (req, res) => {
     const items = await Booking.find({ user: req.user.uid }).sort({ createdAt: -1 }).lean();
     res.json({ success:true, bookings: items.map(x => ({ ...x, status: (x.status||'').toLowerCase() })) });
   } catch (e) {
-    console.error('List bookings error:', e);
     res.status(500).json({ success:false, message:'Failed to list bookings' });
   }
 });
@@ -1028,7 +998,6 @@ app.get('/api/my-bookings/latest', auth, async (req, res) => {
     if (b.status) b.status = String(b.status).toLowerCase();
     res.json({ success:true, booking: b });
   } catch (e) {
-    console.error('Latest booking error:', e);
     res.status(500).json({ success:false, message:'Failed to fetch latest booking' });
   }
 });
@@ -1042,7 +1011,6 @@ app.post('/api/bookings/:id/cancel', auth, async (req, res) => {
     b.status = 'Cancelled';
     await b.save();
     
-    // Send email to admin about cancellation
     await sendEmail({
       to: ADMIN_TO,
       subject: `❌ Booking Cancelled: ${b.childName}`,
@@ -1056,27 +1024,26 @@ app.post('/api/bookings/:id/cancel', auth, async (req, res) => {
 
     res.json({ success:true, booking: b });
   } catch (e) {
-    console.error('Cancel error:', e);
     res.status(500).json({ success:false, message:'Cancel failed' });
   }
 });
 
-// RESCHEDULE – now accepts startISO
+// RESCHEDULE
 app.post('/api/bookings/:id/reschedule', auth, async (req, res) => {
   try {
     const { id } = req.params;
-    const { startISO, level } = req.body;
+    const { startISO, level, date, time } = req.body;
     const b = await Booking.findOne({ _id: id, user: req.user.uid });
     if (!b) return res.status(404).json({ success:false, message:'Not found' });
     
     if (!startISO) return res.status(400).json({ success:false, message:'startISO is required' });
     const newStart = new Date(startISO);
     if (isNaN(newStart)) return res.status(400).json({ success:false, message:'Invalid startISO' });
-    const newEnd = new Date(newStart.getTime() + 25 * 60 * 1000); // 25 minutes
-    const newDateStr = newStart.toISOString().split('T')[0];
-    const newTimeStr = newStart.toISOString().split('T')[1].substring(0,5);
+    const newEnd = new Date(newStart.getTime() + 25 * 60 * 1000); 
 
-    // ИСПРАВЛЕНИЕ: Вызов с передачей b.teacherId
+    const newDateStr = date || newStart.toISOString().split('T')[0];
+    const newTimeStr = time || newStart.toISOString().split('T')[1].substring(0,5);
+
     if (await isSlotBooked(newStart, 25, b._id, req.user.uid, b.teacherId)) {
       return res.status(409).json({ success:false, message:'This time slot is already booked' });
     }
@@ -1092,7 +1059,6 @@ app.post('/api/bookings/:id/reschedule', auth, async (req, res) => {
     b.status = 'Rescheduled';
     await b.save();
 
-    // --- send notifications ---
     await sendEmail({
       to: ADMIN_TO,
       subject: `🔄 Lesson Rescheduled: ${b.childName}`,
@@ -1127,8 +1093,6 @@ app.post('/api/bookings/:id/reschedule', auth, async (req, res) => {
 });
 
 /* ---------------- Admin APIs ---------------- */
-
-// Quick SMTP test endpoint (send to ADMIN_TO)
 app.post('/api/admin/test-email', requireAdmin, async (req, res) => {
   try {
     const ok = await sendEmail({
@@ -1139,12 +1103,10 @@ app.post('/api/admin/test-email', requireAdmin, async (req, res) => {
     if (!ok) return res.status(500).json({ success:false, message:'Send failed' });
     res.json({ success:true });
   } catch (e) {
-    console.error('test-email failed:', e);
     res.status(500).json({ success:false, message:String(e) });
   }
 });
 
-// GET /api/admin/users — список пользователей с датой регистрации
 app.get('/api/admin/users', requireAdmin, async (req, res) => {
   const {
     q = '', since = '', till = '',
@@ -1175,14 +1137,9 @@ app.get('/api/admin/users', requireAdmin, async (req, res) => {
     User.countDocuments(cond)
   ]);
 
-  res.json({
-    success: true,
-    page: pg, limit: per, total,
-    users: items
-  });
+  res.json({ success: true, page: pg, limit: per, total, users: items });
 });
 
-// PATCH /api/admin/users/:id/role — change user role (admin only)
 app.patch('/api/admin/users/:id/role', requireAdmin, async (req, res) => {
   const { id } = req.params;
   const { role } = req.body;
@@ -1194,7 +1151,6 @@ app.patch('/api/admin/users/:id/role', requireAdmin, async (req, res) => {
   res.json({ success:true, user });
 });
 
-// GET /api/admin/bookings — список бронирований с фильтрами
 app.get('/api/admin/bookings', requireAdmin, async (req, res) => {
   const {
     status = '', email = '',
@@ -1221,14 +1177,9 @@ app.get('/api/admin/bookings', requireAdmin, async (req, res) => {
     Booking.countDocuments(cond)
   ]);
 
-  res.json({
-    success: true,
-    page: pg, limit: per, total,
-    bookings: items
-  });
+  res.json({ success: true, page: pg, limit: per, total, bookings: items });
 });
 
-// PATCH /api/admin/bookings/:id/status — смена статуса/даты/времени/уровня/преподавателя
 app.patch('/api/admin/bookings/:id/status', requireAdmin, async (req, res) => {
   const { id } = req.params;
   const { status, dateStr, timeStr, level, teacherName, teacherId } = req.body || {};
@@ -1248,18 +1199,16 @@ app.patch('/api/admin/bookings/:id/status', requireAdmin, async (req, res) => {
   if (teacherName) b.teacherName = teacherName;
   if (teacherId) b.teacherId = teacherId;
 
-  // If dateStr/timeStr changed, also update start/end (optional but recommended)
   if (dateStr && timeStr) {
     const newStart = new Date(`${dateStr}T${timeStr}:00`);
     if (!isNaN(newStart)) {
       b.start = newStart;
-      b.end = new Date(newStart.getTime() + 25 * 60 * 1000); // 25 minutes
+      b.end = new Date(newStart.getTime() + 25 * 60 * 1000); 
     }
   }
 
   await b.save();
 
-  // Always notify student when status changes
   if (b.email) {
     const statusText = b.status;
     const html = `
@@ -1277,7 +1226,6 @@ app.patch('/api/admin/bookings/:id/status', requireAdmin, async (req, res) => {
   res.json({ success:true, booking: b });
 });
 
-// GET /api/admin/stats — сводка
 app.get('/api/admin/stats', requireAdmin, async (_req, res) => {
   const [usersTotal, bookingsTotal, scheduled, completed, cancelled, noshow] = await Promise.all([
     User.countDocuments({}),
@@ -1295,29 +1243,23 @@ app.get('/api/admin/stats', requireAdmin, async (_req, res) => {
 });
 
 // ===== Admin Deferred Credits =====
-
-// GET /api/admin/deferred — list all deferred credits with student info
 app.get('/api/admin/deferred', requireAdmin, async (req, res) => {
   try {
-    console.log('Fetching deferred credits for admin:', req.admin?.email);
     const deferred = await DeferredCredit.find({})
       .populate('student', 'email firstName lastName')
       .sort({ month: -1, createdAt: -1 })
       .lean();
     res.json({ success: true, deferred });
   } catch (e) {
-    console.error('Error fetching deferred credits:', e);
     res.status(500).json({ success: false, message: 'Failed to fetch deferred credits' });
   }
 });
 
-// POST /api/admin/deferred — create or update a deferred credit
 app.post('/api/admin/deferred', requireAdmin, async (req, res) => {
   try {
     const { studentEmail, month, count } = req.body;
-    console.log('Creating deferred credit for', studentEmail, month, count);
     if (!studentEmail || !month || count === undefined) {
-      return res.status(400).json({ success: false, message: 'studentEmail, month, count required' });
+      return res.status(400).json({ success: false, message: 'Fields required' });
     }
     const student = await User.findOne({ email: studentEmail.toLowerCase() });
     if (!student) {
@@ -1330,53 +1272,44 @@ app.post('/api/admin/deferred', requireAdmin, async (req, res) => {
     );
     res.json({ success: true, deferred });
   } catch (e) {
-    console.error('Error creating deferred credit:', e);
     res.status(500).json({ success: false, message: 'Failed to create deferred credit' });
   }
 });
 
-// PATCH /api/admin/deferred/:id — update count
 app.patch('/api/admin/deferred/:id', requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const { count } = req.body;
-    console.log('Updating deferred credit', id, count);
     if (count === undefined || count < 0 || count > 2) {
-      return res.status(400).json({ success: false, message: 'count must be between 0 and 2' });
+      return res.status(400).json({ success: false, message: 'Count must be between 0 and 2' });
     }
     const deferred = await DeferredCredit.findByIdAndUpdate(id, { count }, { new: true });
     if (!deferred) return res.status(404).json({ success: false, message: 'Not found' });
     res.json({ success: true, deferred });
   } catch (e) {
-    console.error('Error updating deferred credit:', e);
     res.status(500).json({ success: false, message: 'Failed to update' });
   }
 });
 
-// DELETE /api/admin/deferred/:id
 app.delete('/api/admin/deferred/:id', requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    console.log('Deleting deferred credit', id);
     const result = await DeferredCredit.findByIdAndDelete(id);
     if (!result) return res.status(404).json({ success: false, message: 'Not found' });
     res.json({ success: true });
   } catch (e) {
-    console.error('Error deleting deferred credit:', e);
     res.status(500).json({ success: false, message: 'Failed to delete' });
   }
 });
 
 /* ---------------- Admin create lesson ---------------- */
-// Fixed teacher timezone offset (Asia/Dushanbe, UTC+5)
-const TEACHER_TZ_OFFSET = 5; // hours ahead of UTC
+const TEACHER_TZ_OFFSET = 5; 
 
 app.post('/api/admin/bookings/create', requireAdmin, async (req, res) => {
   try {
     const { email, childName, parentName, childAge, country, timeZone, dateStr, timeStr, level, teacherName, teacherId } = req.body || {};
-    console.log('Creating lesson for', email, childName);
     if (!email || !childName || !parentName || !dateStr || !timeStr || !level) {
-      return res.status(400).json({ success:false, message:'Missing required fields: email, childName, parentName, dateStr, timeStr, level' });
+      return res.status(400).json({ success:false, message:'Missing required fields' });
     }
     let user = await User.findOne({ email: email.toLowerCase() });
     if (!user) {
@@ -1387,11 +1320,9 @@ app.post('/api/admin/bookings/create', requireAdmin, async (req, res) => {
         isGuest: true
       });
     }
-    // Admin enters local time (teacher's timezone). Convert to UTC before storing.
     const localDate = new Date(`${dateStr}T${timeStr}:00`); 
-    // Assume the input is in teacher's local time (UTC+5) and convert to UTC.
     const start = new Date(localDate.getTime() - TEACHER_TZ_OFFSET * 60 * 60 * 1000);
-    const end = new Date(start.getTime() + 25 * 60 * 1000); // 25 minutes
+    const end = new Date(start.getTime() + 25 * 60 * 1000);
 
     const booking = await Booking.create({
       user: user._id,
@@ -1412,21 +1343,17 @@ app.post('/api/admin/bookings/create', requireAdmin, async (req, res) => {
     });
     res.json({ success:true, booking });
   } catch (e) {
-    console.error('Admin create lesson failed:', e);
     res.status(500).json({ success:false, message:'Admin create lesson failed' });
   }
 });
 
 /* ---------------- Teacher APIs ---------------- */
 
-// ==== NEW: GET /api/teacher/dashboard ====
 app.get('/api/teacher/dashboard', requireTeacher, async (req, res) => {
   try {
     const teacherId = req.user.id;
-    // Количество закрепленных за преподавателем учеников
     const studentsCount = await User.countDocuments({ role: 'student', assignedTeacher: teacherId });
     
-    // Проведенные уроки в текущем месяце
     const startOfMonth = new Date(new Date().setDate(1));
     const endOfMonth = new Date(new Date().setMonth(startOfMonth.getMonth() + 1, 0));
     
@@ -1442,7 +1369,6 @@ app.get('/api/teacher/dashboard', requireTeacher, async (req, res) => {
   }
 });
 
-// ==== NEW: GET /api/teacher/students ====
 app.get('/api/teacher/students', requireTeacher, async (req, res) => {
   try {
     const teacherId = req.user.id;
@@ -1455,22 +1381,18 @@ app.get('/api/teacher/students', requireTeacher, async (req, res) => {
   }
 });
 
-// ==== NEW: PATCH /api/teacher/bookings/:id/status ====
-// Позволяет преподавателю отмечать проведенные уроки и пропуски
 app.patch('/api/teacher/bookings/:id/status', requireTeacher, async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
     
-    // Разрешаем преподавателю ставить только определенные статусы
     if (!['Completed', 'Conducted', 'No-Show'].includes(status)) {
        return res.status(400).json({ success: false, message: 'Invalid status update for teacher' });
     }
 
-    // Ищем бронирование, которое ПРИНАДЛЕЖИТ этому преподавателю
     const b = await Booking.findOne({ _id: id, teacherId: req.user.id });
     if (!b) {
-      return res.status(404).json({ success: false, message: 'Booking not found or not assigned to you' });
+      return res.status(404).json({ success: false, message: 'Booking not found or not assigned' });
     }
 
     b.status = status;
@@ -1478,16 +1400,14 @@ app.patch('/api/teacher/bookings/:id/status', requireTeacher, async (req, res) =
 
     res.json({ success: true, booking: b });
   } catch (e) {
-    console.error('Teacher update status error:', e);
     res.status(500).json({ success: false, message: 'Failed to update lesson status' });
   }
 });
 
-// GET /api/teacher/schedule — teacher's bookings and slots for a date range
 app.get('/api/teacher/schedule', requireTeacher, async (req, res) => {
   const { from, to } = req.query;
   const teacherId = req.user.id; 
-  const start = from ? new Date(from) : new Date(new Date().setDate(1)); // start of month
+  const start = from ? new Date(from) : new Date(new Date().setDate(1)); 
   const end = to ? new Date(to) : new Date(new Date().setMonth(start.getMonth()+1, 0));
 
   const [bookings, slots] = await Promise.all([
@@ -1511,14 +1431,12 @@ app.get('/api/teacher/schedule', requireTeacher, async (req, res) => {
   res.json({ success:true, bookings, slots });
 });
 
-// GET /api/teacher/slots — list teacher's own slots
 app.get('/api/teacher/slots', requireTeacher, async (req, res) => {
   const teacherId = req.user.id; 
   const slots = await TimeSlot.find({ teacherId }).sort({ createdAt: -1 }).limit(500);
   res.json({ success:true, slots });
 });
 
-// POST /api/teacher/slots — create a new slot
 app.post('/api/teacher/slots', requireTeacher, async (req, res) => {
   const teacherId = req.user.id; 
   const teacher = await User.findById(teacherId);
@@ -1534,13 +1452,11 @@ app.post('/api/teacher/slots', requireTeacher, async (req, res) => {
   res.json({ success:true, slot });
 });
 
-// ИСПРАВЛЕНИЕ: PATCH /api/teacher/slots/:id/toggle — toggle isActive И БЛОКИРОВКА < 12 ЧАСОВ + УПРОЩЕН ДОСТУП АДМИНАМ
 app.patch('/api/teacher/slots/:id/toggle', requireTeacher, async (req, res) => {
   try {
     const { id } = req.params;
     const query = { _id: id };
     
-    // Если это не админ и не менеджер, применяем фильтр по ID преподавателя
     if (!['admin', 'manager'].includes(req.user.role) && req.user.email !== 'shakhrom.azimov99@gmail.com') {
         query.teacherId = req.user.id;
     }
@@ -1548,22 +1464,19 @@ app.patch('/api/teacher/slots/:id/toggle', requireTeacher, async (req, res) => {
     const slot = await TimeSlot.findOne(query); 
     if (!slot) return res.status(404).json({ success:false, message:'Slot not found or access denied' });
     
-    // ПРОВЕРКА: Если слот закрывается
     if (slot.isActive) {
-        // ИСПРАВЛЕНИЕ 1: Нельзя закрывать слот, забронированный через Fixed Grid
         if (slot.studentId) {
-            return res.status(400).json({ success: false, message: 'Этот слот закреплен за студентом (Fixed Grid). Вы не можете его закрыть, пока не открепите ученика.' });
+            return res.status(400).json({ success: false, message: 'This slot is assigned to a student (Fixed Grid). You cannot close it until you unassign the student.' });
         }
 
         const now = new Date();
-        const next12h = new Date(now.getTime() + 12 * 60 * 60 * 1000); // 12 часов с текущего момента
-        const nextMonth = new Date(now.getTime() + 35 * 24 * 60 * 60 * 1000); // на 5 недель вперед
+        const next12h = new Date(now.getTime() + 12 * 60 * 60 * 1000); 
+        const nextMonth = new Date(now.getTime() + 35 * 24 * 60 * 60 * 1000); 
         let hasBookings = false;
 
-        // --- 1. Проверка на 12 часов ---
         if (slot.kind === 'oneoff') {
             if (slot.startISO > now && slot.startISO < next12h) {
-                return res.status(400).json({ success: false, message: 'Нельзя закрыть слот менее чем за 12 часов до начала.' });
+                return res.status(400).json({ success: false, message: 'Cannot close a slot less than 12 hours before it starts.' });
             }
         } else if (slot.kind === 'recurring') {
             let testDate = new Date(now);
@@ -1573,22 +1486,20 @@ app.patch('/api/teacher/slots/:id/toggle', requireTeacher, async (req, res) => {
                     let instance = new Date(testDate);
                     instance.setUTCHours(h, m, 0, 0);
                     if (instance > now && instance < next12h) {
-                         return res.status(400).json({ success: false, message: 'Ближайший слот по этому расписанию начнется менее чем через 12 часов. Закрытие запрещено.' });
+                         return res.status(400).json({ success: false, message: 'Upcoming slot starts in less than 12 hours. Closing forbidden.' });
                     }
                 }
                 testDate.setDate(testDate.getDate() + 1);
             }
         }
 
-        // --- 2. Проверка на наличие бронирований ---
         if (slot.kind === 'recurring') {
             const bookings = await Booking.find({ 
-                teacherId: slot.teacherId, // Ищем по учителю слота, а не только по req.user.id
+                teacherId: slot.teacherId, 
                 start: { $gte: now, $lte: nextMonth },
                 status: { $in: ['PendingPayment', 'Scheduled', 'Rescheduled'] }
             });
             for (const b of bookings) {
-                // ИСПРАВЛЕНИЕ 2: Защита от битых дат b.start
                 if (b.start && b.start.getUTCDay() === slot.dow && b.timeStr === slot.startTime) {
                     hasBookings = true; break;
                 }
@@ -1603,7 +1514,7 @@ app.patch('/api/teacher/slots/:id/toggle', requireTeacher, async (req, res) => {
         }
 
         if (hasBookings) {
-            return res.status(400).json({ success: false, message: 'Невозможно закрыть слот: на это время уже забронированы уроки.' });
+            return res.status(400).json({ success: false, message: 'Cannot close slot: active bookings exist.' });
         }
     }
 
@@ -1616,13 +1527,11 @@ app.patch('/api/teacher/slots/:id/toggle', requireTeacher, async (req, res) => {
   }
 });
 
-// DELETE /api/teacher/slots/:id — delete slot И БЛОКИРОВКА ЕСЛИ ЕСТЬ УРОКИ
 app.delete('/api/teacher/slots/:id', requireTeacher, async (req, res) => {
   try {
     const { id } = req.params;
     const query = { _id: id };
     
-    // Если это не админ и не менеджер, применяем фильтр по ID преподавателя
     if (!['admin', 'manager'].includes(req.user.role) && req.user.email !== 'shakhrom.azimov99@gmail.com') {
         query.teacherId = req.user.id;
     }
@@ -1630,12 +1539,10 @@ app.delete('/api/teacher/slots/:id', requireTeacher, async (req, res) => {
     const slot = await TimeSlot.findOne(query);
     if (!slot) return res.status(404).json({ success:false, message:'Slot not found or access denied' });
 
-    // ИСПРАВЛЕНИЕ: Блокировка удаления слотов Fixed Grid
     if (slot.studentId) {
-        return res.status(400).json({ success: false, message: 'Этот слот закреплен за студентом (Fixed Grid). Вы не можете его удалить.' });
+        return res.status(400).json({ success: false, message: 'This slot is assigned to a student (Fixed Grid). Deletion forbidden.' });
     }
 
-    // ПРОВЕРКА: Нельзя удалить слот, если на нем есть уроки
     const now = new Date();
     const nextMonth = new Date(now.getTime() + 35 * 24 * 60 * 60 * 1000);
     let hasBookings = false;
@@ -1647,7 +1554,6 @@ app.delete('/api/teacher/slots/:id', requireTeacher, async (req, res) => {
             status: { $in: ['PendingPayment', 'Scheduled', 'Rescheduled'] }
         });
         for (const b of bookings) {
-            // ИСПРАВЛЕНИЕ: Защита от битых дат
             if (b.start && b.start.getUTCDay() === slot.dow && b.timeStr === slot.startTime) {
                 hasBookings = true; break;
             }
@@ -1662,7 +1568,7 @@ app.delete('/api/teacher/slots/:id', requireTeacher, async (req, res) => {
     }
 
     if (hasBookings) {
-        return res.status(400).json({ success: false, message: 'Невозможно удалить слот: на это время уже забронированы уроки.' });
+        return res.status(400).json({ success: false, message: 'Cannot delete slot: active bookings exist.' });
     }
 
     await TimeSlot.deleteOne({ _id: id });
@@ -1674,7 +1580,6 @@ app.delete('/api/teacher/slots/:id', requireTeacher, async (req, res) => {
 
 /* ---------------- Schedule feed & Admin Slots ---------------- */
 
-// GET /api/schedule?from=YYYY-MM-DD&to=YYYY-MM-DD
 app.get('/api/schedule', optionalAuth, async (req, res) => {
   try {
     const from = new Date(req.query.from);
@@ -1683,7 +1588,6 @@ app.get('/api/schedule', optionalAuth, async (req, res) => {
       return res.status(400).json({ success:false, message:'Invalid range' });
     }
 
-    // Фильтрация расписания по преподавателю
     let targetTeacherId = null;
     if (req.user) {
       const u = await User.findById(req.user.uid);
@@ -1704,7 +1608,6 @@ app.get('/api/schedule', optionalAuth, async (req, res) => {
       items.push({ type, title, start: st, end: en, ...extra });
     };
 
-    // 1) Lessons from bookings
     const bQuery = {
       status: { $in: ['Scheduled', 'Rescheduled', 'PendingPayment'] },
       start: { $gte: from, $lte: to }
@@ -1731,9 +1634,8 @@ app.get('/api/schedule', optionalAuth, async (req, res) => {
       );
     }
 
-    // 2) Slots from TimeSlot
     const sQuery = {
-      $or: [
+      $or: [ 
         { kind: 'oneoff', startISO: { $lt: to }, endISO: { $gt: from } },
         {
           kind: 'recurring',
@@ -1748,11 +1650,8 @@ app.get('/api/schedule', optionalAuth, async (req, res) => {
 
     const slots = await TimeSlot.find(sQuery).lean();
 
-    // One-off slots
     for (const s of slots) {
       if (s.kind !== 'oneoff') continue;
-      
-      // ИСПРАВЛЕНИЕ 3: Скрываем слоты, которые закрыты преподавателем ИЛИ уже закреплены в Fixed Grid
       if (!s.isActive) continue; 
       
       addItem('slot', 'Available', s.startISO, s.endISO, { 
@@ -1761,12 +1660,9 @@ app.get('/api/schedule', optionalAuth, async (req, res) => {
       });
     }
 
-    // Recurring slots expanded per day
     const dayMs = 24 * 60 * 60 * 1000;
     for (const s of slots) {
       if (s.kind !== 'recurring') continue;
-      
-      // ИСПРАВЛЕНИЕ 3: Скрываем слоты, которые закрыты преподавателем ИЛИ уже закреплены в Fixed Grid
       if (!s.isActive || s.studentId) continue;
       
       const vFrom = s.validFrom ? new Date(s.validFrom) : from;
@@ -1788,12 +1684,10 @@ app.get('/api/schedule', optionalAuth, async (req, res) => {
 
     res.json({ success: true, items });
   } catch (e) {
-    console.error('/api/schedule error:', e);
     res.status(500).json({ success:false, message:'Failed to build schedule' });
   }
 });
 
-// ===== Admin Slots CRUD + Import (CSV/XLSX) =====
 const uploadAny = multer({ storage: multer.memoryStorage(), limits:{ fileSize: 10*1024*1024 } }).any();
 
 app.get('/api/admin/slots', requireAdmin, async (req, res) => {
@@ -1826,14 +1720,12 @@ app.get('/api/admin/slots', requireAdmin, async (req, res) => {
 
     res.json({ success: true, items });
   } catch (e) {
-    console.error('GET /api/admin/slots error:', e);
     res.status(500).json({ success:false, message:'Failed to list slots' });
   }
 });
 
 app.post('/api/admin/slots', requireAdmin, async (req, res) => {
   try {
-    // If teacherId is not provided, you might want to assign a default? For now, accept from body.
     const s = await TimeSlot.create(req.body);
     res.json({ success:true, slot:s });
   } catch (e) {
@@ -1882,20 +1774,15 @@ app.post('/api/admin/slots/import', requireAdmin, uploadAny, async (req, res) =>
   }
 });
 
-/* ---------------- REVIEWS SYSTEM (UPDATED with aggregation) ---------------- */
+/* ---------------- REVIEWS SYSTEM ---------------- */
 
-// 1. Schema for Reviews
 const ReviewSchema = new Schema({
   name: { type: String, required: true },
   email: { type: String, required: true },
-  
-  // --- НОВЫЕ ПОЛЯ ---
   country: { type: String, default: '' },
   role: { type: String, default: 'Parent' },
   child: { type: String, default: '' },
   age: { type: Number },
-  // ------------------
-
   verificationCode: String,
   isVerified: { type: Boolean, default: false },
   ratings: {
@@ -1909,7 +1796,6 @@ const ReviewSchema = new Schema({
 
 const Review = model('Review', ReviewSchema);
 
-// 2. Public API: Get Approved Reviews – UPDATED with aggregation
 app.get('/api/reviews/list', async (req, res) => {
   try {
     const reviews = await Review.find({ status: 'Approved' })
@@ -1917,7 +1803,6 @@ app.get('/api/reviews/list', async (req, res) => {
       .sort({ createdAt: -1 })
       .limit(50);
     
-    // Use aggregation for stats (much faster)
     const statsResult = await Review.aggregate([
       { $match: { status: 'Approved' } },
       { $group: {
@@ -1936,7 +1821,6 @@ app.get('/api/reviews/list', async (req, res) => {
   }
 });
 
-// 3. Public API: Request Verification Code
 app.post('/api/reviews/otp', async (req, res) => {
   try {
     const { name, email } = req.body;
@@ -1972,15 +1856,12 @@ app.post('/api/reviews/otp', async (req, res) => {
 
     res.json({ success: true, message: 'Code sent' });
   } catch (e) {
-    console.error(e);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
 
-// 4. Public API: Verify & Submit
 app.post('/api/reviews/submit', async (req, res) => {
   try {
-    // Получаем новые поля из запроса
     const { email, code, ratings, text, country, role, child, age, name } = req.body;
     
     const review = await Review.findOne({ email, verificationCode: code, status: 'Draft' });
@@ -1989,7 +1870,6 @@ app.post('/api/reviews/submit', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid code or email' });
     }
 
-    // Сохраняем ВСЕ данные
     review.isVerified = true;
     review.status = 'Pending';
     review.ratings = ratings;
@@ -2017,12 +1897,10 @@ app.post('/api/reviews/submit', async (req, res) => {
 
     res.json({ success: true, message: 'Review submitted for moderation' });
   } catch (e) {
-    console.error(e);
     res.status(500).json({ success: false, message: 'Error submitting review' });
   }
 });
 
-// 5. Admin API: Manage Reviews
 app.get('/api/admin/reviews', requireAdmin, async (req, res) => {
   const reviews = await Review.find({ status: { $ne: 'Draft' } }).sort({ createdAt: -1 });
   res.json({ success: true, reviews });
@@ -2039,8 +1917,7 @@ app.delete('/api/admin/reviews/:id', requireAdmin, async (req, res) => {
   res.json({ success: true });
 });
 
-/* ---------------- УПРАВЛЕНИЕ ПОЛЬЗОВАТЕЛЯМИ (Admin) ---------------- */
-// 1. Получить список всех пользователей для админки
+/* ---------------- USER MANAGEMENT ---------------- */
 app.get('/api/admin/users', requireAdmin, async (req, res) => {
   try {
     const users = await User.find({}).select('email firstName lastName role');
@@ -2050,12 +1927,11 @@ app.get('/api/admin/users', requireAdmin, async (req, res) => {
   }
 });
 
-// 2. Изменить роль пользователя (дать права Teacher / Admin)
 app.patch('/api/admin/users/:id', requireAdmin, async (req, res) => {
   try {
     const { role } = req.body;
     if (!['student', 'teacher', 'manager', 'admin'].includes(role)) {
-      return res.status(400).json({ success: false, message: 'Неверная роль' });
+      return res.status(400).json({ success: false, message: 'Invalid role' });
     }
     
     await User.findByIdAndUpdate(req.params.id, { role: role });
@@ -2065,13 +1941,10 @@ app.patch('/api/admin/users/:id', requireAdmin, async (req, res) => {
   }
 });
 
-/* ---------------- УПРАВЛЕНИЕ ПРИВЯЗКАМИ (Admin) ---------------- */
-// Получить списки учеников и учителей
+/* ---------------- ASSIGNMENTS ---------------- */
 app.get('/api/admin/assignments', requireAdmin, async (req, res) => {
   try {
-    // Находим всех студентов и сразу подтягиваем данные их текущего учителя (если есть)
     const students = await User.find({ role: 'student' }).populate('assignedTeacher', 'firstName lastName email');
-    // Находим всех учителей
     const teachers = await User.find({ role: 'teacher' }).select('firstName lastName email');
     res.json({ success: true, students, teachers });
   } catch (e) {
@@ -2079,7 +1952,6 @@ app.get('/api/admin/assignments', requireAdmin, async (req, res) => {
   }
 });
 
-// Сохранить выбранного учителя для студента
 app.patch('/api/admin/assignments/:studentId', requireAdmin, async (req, res) => {
   try {
     const teacherId = req.body.teacherId === 'none' ? null : req.body.teacherId;
